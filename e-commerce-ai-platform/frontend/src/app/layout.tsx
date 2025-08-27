@@ -1,9 +1,6 @@
-'use client';
-
 import type { Metadata } from "next";
 import { Inter } from 'next/font/google';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
+import { Providers } from '@/components/providers';
 import { MainLayout } from '@/components/layout/MainLayout';
 import "./globals.css";
 
@@ -17,17 +14,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        staleTime: 5 * 60 * 1000,
-        gcTime: 10 * 60 * 1000,
-        retry: 3,
-        refetchOnWindowFocus: false,
-      },
-    },
-  }));
-
   return (
     <html lang="zh-CN">
       <head>
@@ -37,11 +23,11 @@ export default function RootLayout({
       <body
         className={`${inter.variable} font-sans antialiased`}
       >
-        <QueryClientProvider client={queryClient}>
+        <Providers>
           <MainLayout>
             {children}
           </MainLayout>
-        </QueryClientProvider>
+        </Providers>
       </body>
     </html>
   );

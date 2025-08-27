@@ -200,7 +200,7 @@ export const corsMiddleware = async (c: Context, next: Next): Promise<Response |
     c.res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
     c.res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key')
     c.res.headers.set('Access-Control-Max-Age', '86400')
-    return new Response('', { status: 204 })
+    return new Response(null, { status: 204 })
   }
   
   // 设置CORS头

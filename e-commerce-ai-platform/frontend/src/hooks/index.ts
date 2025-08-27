@@ -146,7 +146,7 @@ export const useSystemStatus = () => {
 export const useAnalytics = () => {
   return useQuery({
     queryKey: ['analytics'],
-    queryFn: () => apiClient.get<Analytics>('/analytics'),
+    queryFn: () => apiClient.get<Analytics>('/api/analytics/dashboard'),
     refetchInterval: 30000, // 每30秒刷新一次
   });
 };
