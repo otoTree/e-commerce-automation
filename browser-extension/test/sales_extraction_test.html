@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>销量提取功能测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .search-offer-wrapper {
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+        .offer-title-row {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .offer-price-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .price-item {
+            display: flex;
+            align-items: center;
+        }
+        .price-units {
+            color: #ff4000;
+        }
+        .text-main {
+            font-size: 18px;
+            font-weight: bold;
+            color: #ff4000;
+        }
+        .desc-text {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>销量提取功能测试页面</h1>
+    
+    <div class="test-container">
+        <h2>测试用例 1: 标准销量格式</h2>
+        <div class="search-offer-wrapper" id="test1">
+            <div class="offer-title-row">
+                <div class="title-text">
+                    <div>CNC碳纤维板加工 雕刻diy复合材料板 碳纤维双面加工 碳板加工</div>
+                </div>
+            </div>
+            <div class="offer-price-row">
+                <div class="col-desc">
+                    <div class="price-item">
+                        <div class="price-units">¥</div>
+                        <div class="text-main">1</div>
+                    </div>
+                </div>
+                <div class="col-desc_after">
+                    <div class="offer-desc-item">
+                        <div class="desc-text">10万+件</div>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; padding: 3px 0px;">
+                <span style="color: rgba(0, 0, 0, 0.45); font-size: 12px; margin-right: 4px; flex: 0 0 auto;">年销量:</span>
+                <span title="1294127件（268笔）" style="color: rgb(255, 64, 0); font-size: 12px;">1294127件（268笔）</span>
+            </div>
+        </div>
+        <div class="test-result" id="result1"></div>
+    </div>
+
+    <div class="test-container">
+        <h2>测试用例 2: 简化销量格式</h2>
+        <div class="search-offer-wrapper" id="test2">
+            <div class="offer-title-row">
+                <div class="title-text">
+                    <div>测试商品2</div>
+                </div>
+            </div>
+            <div style="padding: 5px 0;">
+                <span>年销量: </span>
+                <span title="50000件">5万件</span>
+            </div>
+        </div>
+        <div class="test-result" id="result2"></div>
+    </div>
+
+    <div class="test-container">
+        <h2>测试用例 3: 无title属性的销量</h2>
+        <div class="search-offer-wrapper" id="test3">
+            <div class="offer-title-row">
+                <div class="title-text">
+                    <div>测试商品3</div>
+                </div>
+            </div>
+            <div>
+                <span>年销量: 30000件（150笔）</span>
+            </div>
+        </div>
+        <div class="test-result" id="result3"></div>
+    </div>
+
+    <div class="test-container">
+        <h2>测试用例 4: 无销量信息</h2>
+        <div class="search-offer-wrapper" id="test4">
+            <div class="offer-title-row">
+                <div class="title-text">
+                    <div>测试商品4</div>
+                </div>
+            </div>
+            <div class="offer-price-row">
+                <div class="price-item">
+                    <div class="price-units">¥</div>
+                    <div class="text-main">99</div>
+                </div>
+            </div>
+        </div>
+        <div class="test-result" id="result4"></div>
+    </div>
+
+    <div class="test-container">
+        <h2>测试结果汇总</h2>
+        <div id="summary"></div>
+    </div>
+
+    <script>
+        // 销量提取器类
+        class SalesVolumeExtractor {
+            extractSalesVolume(element) {
+                // 尝试多种选择器来查找销量信息
+                const selectors = [
+                    'span[title*="件"]',
+                    'span[title*="年销量"]',
+                    'div:contains("年销量:") + span',
+                    'span:contains("件")',
+                    'div[style*="padding: 3px 0px"] span[title]'
+                ];
+                
+                for (const selector of selectors) {
+                    try {
+                        // 对于包含文本的选择器，需要特殊处理
+                        if (selector.includes(':contains')) {
+                            const salesElements = element.querySelectorAll('*');
+                            for (const el of salesElements) {
+                                const text = el.textContent || '';
+                                if (text.includes('年销量:')) {
+                                    // 查找包含销量数据的相邻元素
+                                    const nextSibling = el.nextElementSibling;
+                                    if (nextSibling && nextSibling.getAttribute('title')) {
+                                        return nextSibling.getAttribute('title');
+                                    }
+                                    // 或者在同一个元素中查找
+                                    const match = text.match(/年销量[：:]\s*([^\s]+)/); 
+                                    if (match) {
+                                        return match[1];
+                                    }
+                                }
+                            }
+                        } else {
+                            const salesElement = element.querySelector(selector);
+                            if (salesElement) {
+                                const title = salesElement.getAttribute('title');
+                                const text = salesElement.textContent;
+                                return title || text;
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`销量选择器 ${selector} 执行失败:`, error);
+                    }
+                }
+                
+                // 最后尝试通过正则表达式在整个元素文本中查找销量信息
+                try {
+                    const fullText = element.textContent || '';
+                    const salesMatch = fullText.match(/年销量[：:]?\s*([0-9]+[万千]?[+]?件[^）]*(?:\（[^）]*\）)?)/i);
+                    if (salesMatch) {
+                        return salesMatch[1];
+                    }
+                } catch (error) {
+                    console.warn('正则表达式提取销量失败:', error);
+                }
+                
+                return null;
+            }
+        }
+
+        // 执行测试
+        function runTests() {
+            const extractor = new SalesVolumeExtractor();
+            const testCases = [
+                { id: 'test1', expected: '1294127件（268笔）', description: '标准销量格式' },
+                { id: 'test2', expected: '50000件', description: '简化销量格式' },
+                { id: 'test3', expected: '30000件（150笔）', description: '无title属性的销量' },
+                { id: 'test4', expected: null, description: '无销量信息' }
+            ];
+
+            let passedTests = 0;
+            let totalTests = testCases.length;
+
+            testCases.forEach((testCase, index) => {
+                const element = document.getElementById(testCase.id);
+                const result = extractor.extractSalesVolume(element);
+                const resultDiv = document.getElementById(`result${index + 1}`);
+                
+                let isSuccess = false;
+                if (testCase.expected === null) {
+                    isSuccess = result === null;
+                } else {
+                    isSuccess = result && result.includes(testCase.expected.split('（')[0]);
+                }
+
+                if (isSuccess) {
+                    passedTests++;
+                    resultDiv.className = 'test-result success';
+                    resultDiv.innerHTML = `✅ 测试通过<br>期望: ${testCase.expected || '无销量'}<br>结果: ${result || '无销量'}`;
+                } else {
+                    resultDiv.className = 'test-result error';
+                    resultDiv.innerHTML = `❌ 测试失败<br>期望: ${testCase.expected || '无销量'}<br>结果: ${result || '无销量'}`;
+                }
+            });
+
+            // 显示汇总结果
+            const summaryDiv = document.getElementById('summary');
+            const successRate = (passedTests / totalTests * 100).toFixed(1);
+            summaryDiv.innerHTML = `
+                <h3>测试汇总</h3>
+                <p>通过测试: ${passedTests}/${totalTests}</p>
+                <p>成功率: ${successRate}%</p>
+                <div class="${passedTests === totalTests ? 'success' : 'error'}">
+                    ${passedTests === totalTests ? '🎉 所有测试通过！' : '⚠️ 部分测试失败，需要进一步优化'}
+                </div>
+            `;
+        }
+
+        // 页面加载完成后执行测试
+        document.addEventListener('DOMContentLoaded', runTests);
+    </script>
+</body>
+</html>

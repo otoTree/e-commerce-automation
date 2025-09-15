@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "页面源码查看器",
+  "version": "1.0.0",
+  "description": "快速查看当前页面的HTML源码",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://localhost:3001/*",
+    "https://localhost:3001/*",
+    "https://www.1688.com/*"
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "查看页面源码"
+  },
+  "background": {
+    "service_worker": "src/background/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/extraction_rules.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

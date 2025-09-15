@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "Version du Plugin Assistant d'Achat 1688",
+    "description": "Nom du Plugin"
+  },
+  "extensionDescription": {
+    "message": "Plugin officiel 1688 pour captures d'écran, recherche de produits, tendances de vente, téléchargements et notifications Wangwang.",
+    "description": "Description du Plugin"
+  }
+}

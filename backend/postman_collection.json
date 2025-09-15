@@ -1,0 +1,319 @@
+{
+  "info": {
+    "name": "E-commerce AI Backend API",
+    "description": "电商AI助手后端API接口集合",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "基础功能",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            }
+          }
+        },
+        {
+          "name": "获取扩展列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/extensions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "extensions"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "商品管理",
+      "item": [
+        {
+          "name": "获取商品列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "brand",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "minPrice",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "maxPrice",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "sortBy",
+                  "value": "createdAt",
+                  "disabled": true
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "desc",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "获取商品统计",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", "stats"]
+            }
+          }
+        },
+        {
+          "name": "获取单个商品",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/:productId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", ":productId"],
+              "variable": [
+                {
+                  "key": "productId",
+                  "value": "请替换为实际的商品ID"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "导入1688商品数据",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"products\": [\n    {\n      \"index\": 1,\n      \"link\": \"https://detail.1688.com/offer/123456.html\",\n      \"image\": \"https://example.com/image.jpg\",\n      \"title\": \"智能手机\",\n      \"price\": \"¥999.00\",\n      \"supplier\": \"深圳科技有限公司\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products/import/1688",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", "import", "1688"]
+            }
+          }
+        },
+        {
+          "name": "清空所有商品（测试用）",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/clear",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", "clear"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "任务管理",
+      "item": [
+        {
+          "name": "创建爬取任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://s.1688.com/selloffer/offer_search.htm?keywords=手机\",\n  \"type\": \"1688\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tasks", "create"]
+            }
+          }
+        },
+        {
+          "name": "获取所有任务",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tasks"]
+            }
+          }
+        },
+        {
+          "name": "获取任务状态",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/:taskId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tasks", ":taskId"],
+              "variable": [
+                {
+                  "key": "taskId",
+                  "value": "请替换为实际的任务ID"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "完成任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"products\": [],\n    \"total\": 0\n  },\n  \"success\": true,\n  \"error\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/:taskId/complete",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "tasks", ":taskId", "complete"],
+              "variable": [
+                {
+                  "key": "taskId",
+                  "value": "请替换为实际的任务ID"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "浏览器扩展",
+      "item": [
+        {
+          "name": "扩展注册",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"extensionId\": \"extension-123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/extension/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "extension", "register"]
+            }
+          }
+        },
+        {
+          "name": "扩展心跳",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"extensionId\": \"extension-123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/extension/heartbeat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "extension", "heartbeat"]
+            }
+          }
+        },
+        {
+          "name": "获取待处理任务",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/extension/:extensionId/tasks",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "extension", ":extensionId", "tasks"],
+              "variable": [
+                {
+                  "key": "extensionId",
+                  "value": "extension-123456"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

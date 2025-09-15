@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "1688 구매 도우미 플러그인",
+    "description": "플러그인 이름"
+  },
+  "extensionDescription": {
+    "message": "1688 공식 플러그인으로, 원클릭 스크린샷, 유사 상품 검색, 판매 추세, 다운로드 및 왕왕 알림 기능을 지원합니다.",
+    "description": "플러그인 설명"
+  }
+}
