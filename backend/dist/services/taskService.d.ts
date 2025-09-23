@@ -12,7 +12,6 @@ declare class TaskService {
         config?: any;
         priority?: 'low' | 'medium' | 'high' | 'urgent';
         created_by: mongoose.Types.ObjectId;
-        scheduled_at?: Date | null;
     }): Promise<ITask>;
     getTask(taskId: string): CrawlTask | undefined;
     getAllTasks(): CrawlTask[];

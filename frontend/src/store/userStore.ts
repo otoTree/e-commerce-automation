@@ -1,158 +1,151 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { User, UserPreferences, UserSession } from '../types';
+'use client'
 
-interface UserState {
-  // 用户信息
-  user: User | null;
-  session: UserSession | null;
-  preferences: UserPreferences | null;
-  
-  // 认证状态
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  error: string | null;
-  
-  // Actions
-  setUser: (user: User) => void;
-  setSession: (session: UserSession) => void;
-  setPreferences: (preferences: UserPreferences) => void;
-  updatePreferences: (updates: Partial<UserPreferences>) => void;
-  login: (user: User, session: UserSession) => void;
-  logout: () => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  clearError: () => void;
-  
-  // 权限检查
-  hasPermission: (permission: string) => boolean;
-  hasRole: (role: string) => boolean;
-  
-  // 偏好设置快捷方法
-  toggleTheme: () => void;
-  setLanguage: (language: string) => void;
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+
+// 用户信息接口
+export interface User {
+  id: string
+  username: string
+  email: string
+  role: string
+  avatar?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
-export const useUserStore = create<UserState>()(
+// 用户状态接口
+interface UserState {
+  currentUser: User | null
+  users: User[]
+  loading: boolean
+  error: string | null
+}
+
+// 用户操作接口
+interface UserActions {
+  setCurrentUser: (user: User | null) => void
+  setUsers: (users: User[]) => void
+  addUser: (user: User) => void
+  updateUser: (id: string, updates: Partial<User>) => void
+  removeUser: (id: string) => void
+  setLoading: (loading: boolean) => void
+  setError: (error: string | null) => void
+  clearError: () => void
+  reset: () => void
+}
+
+// 用户 Store 类型
+export type UserStore = UserState & UserActions
+
+// 初始状态
+const initialState: UserState = {
+  currentUser: null,
+  users: [],
+  loading: false,
+  error: null
+}
+
+// 创建用户 Store
+export const useUserStore = create<UserStore>()(
   persist(
     (set, get) => ({
-      // 初始状态
-      user: null,
-      session: null,
-      preferences: null,
-      isAuthenticated: false,
-      isLoading: false,
-      error: null,
-      
-      // Actions
-      setUser: (user: User) => set({ user }),
-      
-      setSession: (session: UserSession) => set({ session }),
-      
-      setPreferences: (preferences: UserPreferences) => set({ preferences }),
-      
-      updatePreferences: (updates: Partial<UserPreferences>) => set((state: UserState) => ({
-        preferences: state.preferences ? {
-          ...state.preferences,
-          ...updates
-        } : null
+      ...initialState,
+
+      // 设置当前用户
+      setCurrentUser: (user) => set({ currentUser: user }),
+
+      // 设置用户列表
+      setUsers: (users) => set({ users }),
+
+      // 添加用户
+      addUser: (user) => set((state) => ({
+        users: [...state.users, user]
       })),
-      
-      login: (user: User, session: UserSession) => set({
-        user,
-        session,
-        isAuthenticated: true,
-        error: null
-      }),
-      
-      logout: () => set({
-        user: null,
-        session: null,
-        isAuthenticated: false,
-        error: null
-      }),
-      
-      setLoading: (isLoading: boolean) => set({ isLoading }),
-      
-      setError: (error: string | null) => set({ error }),
-      
+
+      // 更新用户
+      updateUser: (id, updates) => set((state) => ({
+        users: state.users.map(user => 
+          user.id === id ? { ...user, ...updates } : user
+        ),
+        currentUser: state.currentUser?.id === id 
+          ? { ...state.currentUser, ...updates }
+          : state.currentUser
+      })),
+
+      // 删除用户
+      removeUser: (id) => set((state) => ({
+        users: state.users.filter(user => user.id !== id),
+        currentUser: state.currentUser?.id === id ? null : state.currentUser
+      })),
+
+      // 设置加载状态
+      setLoading: (loading) => set({ loading }),
+
+      // 设置错误信息
+      setError: (error) => set({ error }),
+
+      // 清除错误信息
       clearError: () => set({ error: null }),
-      
-      // 权限检查
-      hasPermission: (permission: string) => {
-        const state = get() as UserState;
-        if (!state.user) return false;
-        
-        // 简化权限检查，基于用户角色
-        return state.user.role === 'admin' || 
-               (state.user.role === 'operator' && permission !== 'admin');
-      },
-      
-      hasRole: (roleName: string) => {
-        const state = get() as UserState;
-        if (!state.user) return false;
-        
-        return state.user.role === roleName;
-      },
-      
-      // 偏好设置快捷方法
-      toggleTheme: () => set((state: UserState) => {
-        if (!state.preferences) return state;
-        
-        const currentTheme = state.preferences.dashboard_layout.theme;
-        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-        return {
-          preferences: {
-            ...state.preferences,
-            dashboard_layout: {
-              ...state.preferences.dashboard_layout,
-              theme: newTheme
-            }
-          }
-        };
-      }),
-      
-      setLanguage: (language: string) => set((state: UserState) => ({
-        preferences: state.preferences ? {
-          ...state.preferences,
-          language
-        } : null
-      }))
+
+      // 重置状态
+      reset: () => set(initialState)
     }),
     {
-      name: 'user-storage',
-      partialize: (state: UserState) => ({
-        user: state.user,
-        preferences: state.preferences,
-        isAuthenticated: state.isAuthenticated
+      name: 'user-store',
+      partialize: (state) => ({
+        currentUser: state.currentUser,
+        users: state.users
       })
     }
   )
-);
+)
 
-// 选择器函数
-export const selectUser = (state: UserState) => state.user;
-export const selectIsAuthenticated = (state: UserState) => state.isAuthenticated;
-export const selectPreferences = (state: UserState) => state.preferences;
-export const selectTheme = (state: UserState) => state.preferences?.dashboard_layout.theme || 'light';
-export const selectLanguage = (state: UserState) => state.preferences?.language || 'zh-CN';
-export const selectDashboardLayout = (state: UserState) => state.preferences?.dashboard_layout;
+// 用户相关的辅助函数
+export const userHelpers = {
+  // 根据 ID 查找用户
+  findUserById: (users: User[], id: string): User | undefined =>
+    users.find(user => user.id === id),
 
-// Hook 快捷方式
-export const useAuth = () => {
-  const { isAuthenticated, user, login, logout, isLoading, error } = useUserStore();
-  return { isAuthenticated, user, login, logout, isLoading, error };
-};
+  // 根据邮箱查找用户
+  findUserByEmail: (users: User[], email: string): User | undefined =>
+    users.find(user => user.email === email),
 
-export const useTheme = () => {
-  const { preferences, toggleTheme, setLanguage } = useUserStore();
-  const theme = preferences?.dashboard_layout.theme || 'light';
-  const language = preferences?.language || 'zh-CN';
-  
-  return { theme, language, toggleTheme, setLanguage };
-};
+  // 根据用户名查找用户
+  findUserByUsername: (users: User[], username: string): User | undefined =>
+    users.find(user => user.username === username),
 
-export const usePermissions = () => {
-  const { hasPermission, hasRole } = useUserStore();
-  return { hasPermission, hasRole };
-};
+  // 检查用户是否为管理员
+  isAdmin: (user: User | null): boolean =>
+    user?.role === 'admin',
+
+  // 格式化用户显示名称
+  getDisplayName: (user: User): string =>
+    user.username || user.email || '未知用户',
+
+  // 获取用户头像 URL
+  getAvatarUrl: (user: User): string =>
+    user.avatar || '/default-avatar.png'
+}
+
+// 用户 Store 选择器
+export const userSelectors = {
+  // 获取当前用户
+  getCurrentUser: (state: UserStore) => state.currentUser,
+
+  // 获取所有用户
+  getUsers: (state: UserStore) => state.users,
+
+  // 获取加载状态
+  getLoading: (state: UserStore) => state.loading,
+
+  // 获取错误信息
+  getError: (state: UserStore) => state.error,
+
+  // 检查是否已登录
+  isLoggedIn: (state: UserStore) => !!state.currentUser,
+
+  // 检查当前用户是否为管理员
+  isCurrentUserAdmin: (state: UserStore) => 
+    userHelpers.isAdmin(state.currentUser)
+}

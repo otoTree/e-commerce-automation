@@ -1,220 +1,217 @@
-import { Router } from 'express';
-import type { Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { z } from 'zod';
+import User from '../models/User.js';
 
 const router = Router();
 
-// 请求验证schemas
-const registerSchema = z.object({
-  username: z.string().min(3).max(50),
-  email: z.string().email(),
-  password: z.string().min(6),
-  role: z.enum(['admin', 'operator', 'viewer']).optional().default('operator')
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string()
-});
-
-// 用户注册
+// 用户注册接口
 router.post('/register', async (req: Request, res: Response) => {
   try {
-    const validatedData = registerSchema.parse(req.body);
-    
-    // TODO: 实现用户注册逻辑
-    // - 检查用户是否已存在
-    // - 密码哈希处理
-    // - 创建用户记录
-    // - 生成JWT token
-    
+    const { username, email, password, firstName, lastName, phone } = req.body;
+
+    // 验证必填字段
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: '用户名、邮箱和密码为必填字段'
+      });
+    }
+
+    // 验证邮箱格式
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: '请输入有效的邮箱地址'
+      });
+    }
+
+    // 验证密码强度
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: '密码至少需要6个字符'
+      });
+    }
+
+    // 检查用户名是否已存在
+    const existingUserByUsername = await User.findOne({ username });
+    if (existingUserByUsername) {
+      return res.status(409).json({
+        success: false,
+        error: '用户名已存在'
+      });
+    }
+
+    // 检查邮箱是否已存在
+    const existingUserByEmail = await User.findOne({ email });
+    if (existingUserByEmail) {
+      return res.status(409).json({
+        success: false,
+        error: '邮箱已被注册'
+      });
+    }
+
+    // 加密密码
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // 创建新用户
+    const newUser = new User({
+      username,
+      email,
+      password: hashedPassword,
+      firstName: firstName || '',
+      lastName: lastName || '',
+      phone: phone || '',
+      role: 'user',
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    await newUser.save();
+
+    // 返回成功响应（不包含密码）
+    const userResponse = {
+      id: newUser._id,
+      username: newUser.username,
+      email: newUser.email,
+      firstName: newUser.firstName,
+      lastName: newUser.lastName,
+      phone: newUser.phone,
+      role: newUser.role,
+      createdAt: newUser.createdAt
+    };
+
     res.status(201).json({
       success: true,
+      message: '用户注册成功',
       data: {
-        user: {
-          id: 'placeholder_user_id',
-          username: validatedData.username,
-          email: validatedData.email,
-          role: validatedData.role,
-          created_at: new Date().toISOString()
-        },
-        token: 'placeholder_jwt_token'
+        user: userResponse
       }
     });
+
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: '请求参数验证失败',
-          details: error.issues
-        }
-      });
-    }
-    
+    console.error('用户注册错误:', error);
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: '注册失败'
-      }
+      error: '注册过程中发生错误，请稍后重试'
     });
   }
 });
 
-// 用户登录
+// 用户登录接口
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const validatedData = loginSchema.parse(req.body);
-    
-    // TODO: 实现用户登录逻辑
-    // - 验证用户凭据
-    // - 密码验证
-    // - 生成JWT token
-    // - 更新最后登录时间
-    
-    res.json({
-      success: true,
-      data: {
-        user: {
-          id: 'placeholder_user_id',
-          username: 'placeholder_username',
-          email: validatedData.email,
-          role: 'operator',
-          last_login: new Date().toISOString()
-        },
-        token: 'placeholder_jwt_token',
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7天后过期
-      }
-    });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
+    const { username, password } = req.body;
+
+    // 验证必填字段
+    if (!username || !password) {
       return res.status(400).json({
         success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: '请求参数验证失败',
-          details: error.issues
-        }
+        error: '用户名和密码为必填字段'
       });
     }
-    
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: '登录失败'
-      }
-    });
-  }
-});
 
-// 刷新Token
-router.post('/refresh', async (req: Request, res: Response) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // 查找用户（支持用户名或邮箱登录）
+    const user = await User.findOne({
+      $or: [
+        { username: username },
+        { email: username }
+      ]
+    });
+
+    if (!user) {
       return res.status(401).json({
         success: false,
-        error: {
-          code: 'TOKEN_MISSING',
-          message: '缺少认证token'
-        }
+        error: '用户名或密码错误'
       });
     }
-    
-    const token = authHeader.substring(7);
-    
-    // TODO: 实现token刷新逻辑
-    // - 验证当前token
-    // - 生成新的token
-    // - 更新用户会话
-    
+
+    // 检查用户是否激活
+    if (!user.isActive) {
+      return res.status(401).json({
+        success: false,
+        error: '账户已被禁用，请联系管理员'
+      });
+    }
+
+    // 验证密码
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: '用户名或密码错误'
+      });
+    }
+
+    // 生成JWT token
+    const jwtSecret = process.env.JWT_SECRET || 'your-default-secret-key';
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role
+      },
+      jwtSecret,
+      { expiresIn: '24h' }
+    );
+
+    // 更新最后登录时间
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    // 返回成功响应
+    const userResponse = {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      role: user.role,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt
+    };
+
     res.json({
       success: true,
+      message: '登录成功',
       data: {
-        token: 'new_placeholder_jwt_token',
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+        token,
+        user: userResponse,
+        expiresIn: 24 * 60 * 60 // 24小时，以秒为单位
       }
     });
+
   } catch (error) {
+    console.error('用户登录错误:', error);
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Token刷新失败'
-      }
+      error: '登录过程中发生错误，请稍后重试'
     });
   }
 });
 
-// 用户登出
-router.post('/logout', async (req: Request, res: Response) => {
+// 获取用户信息接口（需要认证）
+router.get('/profile', async (req: Request, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'TOKEN_MISSING',
-          message: '缺少认证token'
-        }
-      });
-    }
-    
-    const token = authHeader.substring(7);
-    
-    // TODO: 实现用户登出逻辑
-    // - 将token加入黑名单
-    // - 清除用户会话
-    
-    res.json({
-      success: true,
-      message: '登出成功'
+    // 这里需要添加JWT验证中间件
+    // 暂时返回未实现的响应
+    res.status(501).json({
+      success: false,
+      error: '功能暂未实现'
     });
   } catch (error) {
+    console.error('获取用户信息错误:', error);
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: '登出失败'
-      }
+      error: '获取用户信息失败'
     });
   }
 });
-
-// 验证Token中间件函数
-export const authenticateToken = (req: Request, res: Response, next: any) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: {
-        code: 'TOKEN_MISSING',
-        message: '缺少认证token'
-      }
-    });
-  }
-  
-  const token = authHeader.substring(7);
-  
-  // TODO: 实现token验证逻辑
-  // - 验证JWT token
-  // - 检查token是否在黑名单中
-  // - 将用户信息添加到req对象
-  
-  // 临时实现，直接通过
-  (req as any).user = {
-    id: 'placeholder_user_id',
-    username: 'placeholder_username',
-    email: 'placeholder@example.com',
-    role: 'operator'
-  };
-  
-  next();
-};
 
 export default router;

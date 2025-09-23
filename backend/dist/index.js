@@ -1,27 +1,42 @@
 import express from 'express';
 import { config } from 'dotenv';
-import { setupMiddleware } from './middleware/index.js';
+import { setupMiddleware, setupErrorHandling } from './middleware/index.js';
 import apiRoutes from './routes/index.js';
 import { startCleanupTask } from './utils/cleanup.js';
 import { connectDB } from './config/database.js';
+import './services/taskExecutor.js'; // 启动任务执行器
 // Load environment variables
 config();
-// Connect to MongoDB
-connectDB();
 const app = express();
 const PORT = process.env.PORT || 3001;
 // Setup middleware
 setupMiddleware(app);
 // Setup routes
-app.use('/', apiRoutes);
 app.use('/api', apiRoutes);
-// Start cleanup task for expired extensions
-startCleanupTask();
-// Start server
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log('Extension registration endpoint: POST /api/extension/register');
-    console.log('Task creation endpoint: POST /api/tasks/create');
-});
+// Setup error handling (must be after routes)
+setupErrorHandling(app);
+// Connect to MongoDB and start server
+const startServer = async () => {
+    try {
+        // Connect to MongoDB
+        await connectDB();
+        // Start cleanup task for expired data
+        startCleanupTask();
+        // Start server
+        app.listen(PORT, () => {
+            console.log(`🚀 服务器运行在端口 ${PORT}`);
+            console.log(`📊 API健康检查: http://localhost:${PORT}/api/health`);
+            console.log(`📡 数据收集API: http://localhost:${PORT}/api/data-collection`);
+            console.log(`🔍 分析API: http://localhost:${PORT}/api/analysis`);
+            console.log(`📋 任务监控API: http://localhost:${PORT}/api/tasks`);
+        });
+    }
+    catch (error) {
+        console.error('❌ 服务器启动失败:', error);
+        process.exit(1);
+    }
+};
+// 启动服务器
+startServer();
 export default app;
 //# sourceMappingURL=index.js.map

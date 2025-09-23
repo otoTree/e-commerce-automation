@@ -1,9 +1,84 @@
 import mongoose, { Document } from 'mongoose';
+export type TaskProgressStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+export type OperationTaskType = 'full_operation' | 'analysis_only' | 'content_only' | 'marketing_only';
+export interface TaskProgress {
+    analysis: TaskProgressStatus;
+    content: TaskProgressStatus;
+    marketing: TaskProgressStatus;
+    tracking: TaskProgressStatus;
+    overall_progress: number;
+    current_stage: string;
+    completed_stages: string[];
+    next_stages: string[];
+    estimated_completion?: Date;
+    actual_completion?: Date;
+    product_analysis?: TaskProgressStatus;
+    content_generation?: TaskProgressStatus;
+    marketing_strategy?: TaskProgressStatus;
+    performance_tracking?: TaskProgressStatus;
+}
+export interface TaskResults {
+    analysisScore?: number;
+    contentGenerated?: number;
+    marketingPlansCreated?: number;
+    performanceMetrics?: {
+        views: number;
+        clicks: number;
+        conversions: number;
+        revenue: number;
+        ctr: number;
+        cvr: number;
+        roas: number;
+    } | null;
+}
+export interface OperationConfig {
+    product_info: {
+        product_id: string;
+        product_name: string;
+        product_image: string;
+        category: string;
+        source_platform?: string;
+    };
+    target_platforms: Array<{
+        platform: string;
+        config: {
+            category_id?: string;
+            attributes?: Record<string, any>;
+            pricing_strategy?: 'fixed' | 'dynamic' | 'competitive';
+            inventory_sync?: boolean;
+        };
+    }>;
+    modules: {
+        analysis: {
+            enabled: boolean;
+            custom_requirements?: string;
+            analysis_type?: 'basic' | 'comprehensive' | 'custom';
+        };
+        content_generation: {
+            enabled: boolean;
+            target_languages: string[];
+            content_types: string[];
+            tone?: 'professional' | 'casual' | 'persuasive';
+        };
+        marketing: {
+            enabled: boolean;
+            budget_range?: {
+                min: number;
+                max: number;
+            };
+            preferred_channels?: string[];
+        };
+        tracking: {
+            enabled: boolean;
+            kpi_targets?: Record<string, number>;
+        };
+    };
+}
 export interface ITask extends Document {
     task_id: string;
     title: string;
     description?: string;
-    type: 'data_collection' | 'content_generation' | 'analysis' | 'optimization' | 'custom';
+    type: 'data_collection' | 'content_generation' | 'analysis' | 'optimization' | 'custom' | 'operation';
     config: {
         data_collection?: {
             source_urls: string[];
@@ -80,6 +155,9 @@ export interface ITask extends Document {
             }>;
         };
     };
+    operation_config?: OperationConfig;
+    operation_progress?: TaskProgress;
+    operation_results?: TaskResults;
     status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
     priority: 'low' | 'medium' | 'high' | 'urgent';
     execution_history: Array<{

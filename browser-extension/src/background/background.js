@@ -80,7 +80,11 @@ class ExtensionManager {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          extensionId: this.extensionId
+          extension_id: this.extensionId,
+          browser_info: {
+            name: 'Chrome',
+            version: navigator.userAgent
+          }
         })
       });
       
@@ -112,7 +116,6 @@ class ExtensionManager {
   
   async sendHeartbeat() {
     if (!this.isRegistered) {
-      console.log('扩展未注册，跳过心跳检测');
       return;
     }
     
@@ -123,24 +126,24 @@ class ExtensionManager {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          extensionId: this.extensionId
+          extension_id: this.extensionId
         })
       });
       
       if (response.ok) {
-        console.log('心跳检测成功');
+        const data = await response.json();
+        console.log('心跳发送成功:', data.message);
         
-        // 更新最后心跳时间
+        // 保存心跳时间
         await chrome.storage.local.set({ 
           lastHeartbeat: Date.now()
         });
       } else {
-        const errorData = await response.json();
-        console.error('心跳检测失败:', errorData.error);
+        console.error('心跳发送失败:', response.status);
         
         // 如果心跳失败，可能需要重新注册
         if (response.status === 404) {
-          console.log('扩展未在后端注册，尝试重新注册');
+          console.log('扩展未注册，尝试重新注册');
           this.isRegistered = false;
           await this.registerToBackend();
         }
@@ -214,23 +217,24 @@ class ExtensionManager {
     }
     
     try {
-      const response = await fetch(`${this.backendUrl}/${this.extensionId}/tasks`, {
-        method: 'GET',
+      const response = await fetch(`${this.backendUrl}/tasks/poll`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-        }
+        },
+        body: JSON.stringify({
+          extension_id: this.extensionId
+        })
       });
       
       if (response.ok) {
         const data = await response.json();
-        if (data.success && data.tasks && data.tasks.length > 0) {
-          console.log(`收到 ${data.tasks.length} 个新任务`);
-          this.currentTasks = data.tasks;
-          
-          // 处理每个任务
-          for (const task of data.tasks) {
-            this.processTask(task);
-          }
+        if (data.success && data.data.task) {
+          console.log('收到新任务:', data.data.task);
+          // 处理任务
+          await this.processTask(data.data.task);
+        } else {
+          console.log('暂无待执行任务');
         }
       } else {
         console.error('获取任务失败:', response.status);
@@ -244,227 +248,624 @@ class ExtensionManager {
   async processTask(task) {
     console.log('开始处理任务:', task);
     
+    // 立即打开任务URL（如果有的话）
+    await this.openTaskUrl(task);
+    
     try {
-      // 打开目标网址
+      let extractedData = null;
+      
+      // 根据任务类型处理
+      switch (task.type) {
+        case 'single_product':
+          extractedData = await this.processSingleProductTask(task);
+          break;
+        case 'batch_collection':
+          extractedData = await this.processBatchCollectionTask(task);
+          break;
+        case 'keyword_search':
+          extractedData = await this.processKeywordSearchTask(task);
+          break;
+        case 'source_extraction':
+          // 源码提取任务
+          extractedData = await this.processSourceExtractionTask(task);
+          break;
+        case 'full_data_collection':
+          // 检查是否为源码获取请求
+          if (task.input?.analysis_options?.request_type === 'get_source') {
+            extractedData = await this.processSourceExtractionTask(task);
+          } else {
+            console.log(`⚠️ 全量数据收集任务 ${task.task_id} 应在后端处理，插件跳过`);
+            return;
+          }
+          break;
+        case 'deep_analysis':
+          // 分析任务已移至后端处理，插件不再处理此类任务
+          console.log(`⚠️ 分析任务 ${task.task_id} 应在后端处理，插件跳过`);
+          return;
+        case 'market_heat_detection':
+          // 市场热度检测任务已移至后端处理，插件不再处理此类任务
+          console.log(`⚠️ 市场热度检测任务 ${task.task_id} 应在后端处理，插件跳过`);
+          return;
+        case 'keyword_collection':
+          console.log(`⚠️ 关键词收集任务 ${task.task_id} 应在后端处理，插件跳过`);
+          return;
+        default:
+          throw new Error(`未知任务类型: ${task.type}`);
+      }
+      
+      // 对于源码提取任务，检查结果格式
+      if (task.type === 'source_extraction') {
+        if (extractedData && extractedData.results && extractedData.results.length > 0) {
+          await this.sendTaskResult(task.task_id, extractedData, true);
+          console.log(`源码提取任务 ${task.task_id} 完成，处理了 ${extractedData.results.length} 个URL`);
+        } else {
+          throw new Error('源码提取失败或未找到有效结果');
+        }
+      } else {
+        // 其他任务类型的结果检查
+        if (extractedData && extractedData.products && extractedData.products.length > 0) {
+          // 发送结果到后端
+          await this.sendTaskResult(task.task_id, extractedData, true);
+          console.log(`任务 ${task.task_id} 完成，提取到 ${extractedData.products.length} 个商品`);
+        } else {
+          throw new Error('数据提取失败或未找到商品');
+        }
+      }
+      
+    } catch (error) {
+      console.error(`任务 ${task.task_id} 处理失败:`, error);
+      await this.sendTaskResult(task.task_id, null, false, error.message);
+    }
+  }
+
+  // 立即打开任务URL
+  async openTaskUrl(task) {
+    try {
+      let url = null;
+      
+      // 从不同任务类型中提取URL
+      if (task.input?.product_urls && task.input.product_urls.length > 0) {
+        url = task.input.product_urls[0];
+      } else if (task.input?.url) {
+        url = task.input.url;
+      } else if (task.input?.search_url) {
+        url = task.input.search_url;
+      }
+      
+      if (!url) {
+        console.log('任务中没有找到URL，跳过自动打开');
+        return;
+      }
+      
+      // 检查URL是否有效
+      if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+        console.log(`跳过不支持的URL协议: ${url}`);
+        return;
+      }
+      
+      console.log(`🚀 立即打开任务URL: ${url}`);
+      
+      // 获取或创建窗口
+      const windows = await chrome.windows.getAll();
+      let targetWindow = windows.find(w => w.type === 'normal');
+      
+      if (!targetWindow) {
+        console.log('创建新窗口来打开URL');
+        targetWindow = await chrome.windows.create({
+          url: url,
+          type: 'normal',
+          focused: true
+        });
+      } else {
+        // 在现有窗口中创建新标签页
+        await chrome.tabs.create({
+          url: url,
+          windowId: targetWindow.id,
+          active: true
+        });
+      }
+      
+      console.log(`✅ 已打开任务URL: ${url}`);
+      
+    } catch (error) {
+      console.error('打开任务URL失败:', error);
+      // 不抛出错误，让任务继续执行
+    }
+  }
+  
+  // 处理单个商品收集任务
+  async processSingleProductTask(task) {
+    // 修复：从product_urls数组中获取第一个URL
+    const { product_urls, platform } = task.input;
+    const url = product_urls && product_urls.length > 0 ? product_urls[0] : null;
+    
+    if (!url) {
+      throw new Error('任务中没有提供有效的商品URL');
+    }
+    
+    // 检查URL是否为chrome://协议，如果是则跳过
+    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+      throw new Error(`不支持的URL协议: ${url}`);
+    }
+    
+    console.log(`开始处理单品收集任务，URL: ${url}`);
+    
+    try {
+      // 首先确保有可用的窗口
+      const windows = await chrome.windows.getAll();
+      let targetWindow = windows.find(w => w.type === 'normal');
+      
+      if (!targetWindow) {
+        console.log('没有找到可用窗口，创建新窗口');
+        targetWindow = await chrome.windows.create({
+          url: 'about:blank',
+          type: 'normal',
+          focused: true
+        });
+        
+        // 等待窗口创建完成
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      // 等待一段时间确保浏览器状态稳定
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // 在指定窗口中创建标签页
       const tab = await chrome.tabs.create({
-        url: task.url,
-        active: true // 在前台激活打开
+        url: url,
+        windowId: targetWindow.id,
+        active: true
       });
+      
+      console.log(`已在窗口 ${targetWindow.id} 中创建标签页 ${tab.id}，正在加载: ${url}`);
+      
+      // 等待标签页状态稳定
+      await this.waitForTabStable(tab.id);
       
       // 等待页面加载完成
       await this.waitForTabLoad(tab.id);
+      console.log(`标签页 ${tab.id} 加载完成`);
       
-      // 执行爬虫脚本
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        function: this.extractProductData
-      });
+      // 提取商品数据
+      const extractedData = await this.extractProductsFromTab(tab.id);
+      console.log(`从标签页 ${tab.id} 提取到数据:`, extractedData);
       
-      if (results && results[0] && results[0].result) {
-        const extractedData = results[0].result;
-        
-        // 发送结果到后端
-        await this.sendTaskResult(task.id, extractedData, true);
-        
-        console.log(`任务 ${task.id} 完成，提取到 ${extractedData.total} 个商品`);
-      } else {
-        throw new Error('数据提取失败');
+      // 为商品添加平台信息和源URL
+      if (extractedData && extractedData.products) {
+        extractedData.products.forEach(product => {
+          product.platform = platform || 'unknown';
+          product.source_url = url;
+          product.collected_at = new Date().toISOString();
+        });
       }
       
-      // 关闭标签页
-      await chrome.tabs.remove(tab.id);
+      // 延迟关闭标签页，便于调试
+      setTimeout(async () => {
+        try {
+          await chrome.tabs.remove(tab.id);
+          console.log(`已关闭标签页 ${tab.id}`);
+        } catch (error) {
+          console.log(`关闭标签页 ${tab.id} 失败:`, error);
+        }
+      }, 5000); // 5秒后关闭
       
+      return extractedData;
     } catch (error) {
-      console.error(`任务 ${task.id} 处理失败:`, error);
-      await this.sendTaskResult(task.id, null, false, error.message);
+      console.error('处理单品收集任务失败:', error);
+      throw error;
+    }
+  }
+  
+  // 等待标签页状态稳定
+  async waitForTabStable(tabId) {
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      const maxAttempts = 20; // 10秒
+      
+      const checkStable = () => {
+        attempts++;
+        
+        chrome.tabs.get(tabId, (tab) => {
+          if (chrome.runtime.lastError) {
+            console.log(`标签页 ${tabId} 状态检查失败 (尝试 ${attempts}/${maxAttempts}):`, chrome.runtime.lastError.message);
+            
+            if (attempts >= maxAttempts) {
+              reject(new Error(`标签页 ${tabId} 状态检查超时`));
+              return;
+            }
+            
+            setTimeout(checkStable, 500);
+            return;
+          }
+          
+          console.log(`标签页 ${tabId} 状态稳定 (尝试 ${attempts}/${maxAttempts})`);
+          resolve();
+        });
+      };
+      
+      checkStable();
+    });
+  }
+  
+  // 处理批量收集任务
+  async processBatchCollectionTask(task) {
+    const { urls } = task.input;
+    const allProducts = [];
+    
+    for (const url of urls) {
+      try {
+        const tab = await chrome.tabs.create({
+          url: url,
+          active: true
+        });
+        
+        await this.waitForTabLoad(tab.id);
+        const extractedData = await this.extractProductsFromTab(tab.id);
+        
+        if (extractedData && extractedData.products) {
+          allProducts.push(...extractedData.products);
+        }
+        
+        await chrome.tabs.remove(tab.id);
+        
+        // 添加延迟避免过于频繁的请求
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (error) {
+        console.error(`批量收集中处理URL ${url} 失败:`, error);
+      }
+    }
+    
+    return {
+      products: allProducts,
+      total: allProducts.length,
+      source: 'batch_collection'
+    };
+  }
+  
+  // 处理关键词搜索任务
+  async processKeywordSearchTask(task) {
+    const { keyword, platform, maxResults } = task.input;
+    
+    // 构建搜索URL
+    let searchUrl;
+    switch (platform) {
+      case 'taobao':
+        searchUrl = `https://s.taobao.com/search?q=${encodeURIComponent(keyword)}`;
+        break;
+      case '1688':
+        searchUrl = `https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeURIComponent(keyword)}`;
+        break;
+      default:
+        throw new Error(`不支持的平台: ${platform}`);
+    }
+    
+    const tab = await chrome.tabs.create({
+      url: searchUrl,
+      active: true
+    });
+    
+    try {
+      await this.waitForTabLoad(tab.id);
+      const extractedData = await this.extractProductsFromTab(tab.id);
+      
+      // 限制结果数量
+      if (extractedData && extractedData.products && maxResults) {
+        extractedData.products = extractedData.products.slice(0, maxResults);
+        extractedData.total = extractedData.products.length;
+      }
+      
+      return extractedData;
+    } finally {
+      await chrome.tabs.remove(tab.id);
     }
   }
   
   // 等待标签页加载完成
   waitForTabLoad(tabId) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      let attempts = 0;
+      const maxAttempts = 30; // 最多等待30次，每次500ms，总共15秒
+      
       const checkStatus = () => {
+        attempts++;
+        
         chrome.tabs.get(tabId, (tab) => {
+          if (chrome.runtime.lastError) {
+            console.error('获取标签页状态失败:', chrome.runtime.lastError);
+            reject(new Error(`标签页 ${tabId} 不存在或已关闭`));
+            return;
+          }
+          
+          console.log(`标签页 ${tabId} 状态检查 (${attempts}/${maxAttempts}): ${tab.status}, URL: ${tab.url}`);
+          
           if (tab.status === 'complete') {
+            console.log(`标签页 ${tabId} 加载完成，额外等待2秒确保页面完全渲染`);
             // 额外等待2秒确保页面完全加载
             setTimeout(resolve, 2000);
+          } else if (attempts >= maxAttempts) {
+            console.error(`标签页 ${tabId} 加载超时`);
+            reject(new Error(`标签页加载超时，当前状态: ${tab.status}`));
           } else {
             setTimeout(checkStatus, 500);
           }
         });
       };
+      
       checkStatus();
     });
   }
 
-    // 获取当前标签页信息
-  async  getCurrentTab() {
-    if (typeof chrome !== 'undefined' && chrome.tabs) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      return tab;
-    }
-    return { url: window.location.href, id: null };
-  }
-
-    // 提取商品信息
-  async extractProducts() {
+  // 使用与popup相同的商品提取逻辑
+  async extractProductsFromTab(tabId) {
     try {
-      
-      const tab = await getCurrentTab();
-      
-      if (!tab.id) {
-        throw new Error('无法获取当前标签页ID');
-      }
-      
-      // 使用content.js中的1688专用提取器
+      // 尝试发送消息给content script
       let results;
-      if (typeof chrome !== 'undefined' && chrome.tabs) {
-        try {
-          // 尝试发送消息给content script
-          results = await chrome.tabs.sendMessage(tab.id, { action: 'extractProducts' });
-        } catch (error) {
-          // 如果连接失败，尝试重新注入content script
-          if (error.message.includes('Could not establish connection') || 
-              error.message.includes('Receiving end does not exist')) {
-            showStatus('正在重新加载提取器...', 'info');
-            
-            const injected = await injectContentScript(tab.id);
-            if (!injected) {
-              throw new Error('无法注入内容脚本');
-            }
-            
-            // 等待一下让content script初始化
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // 重新尝试发送消息
-            results = await chrome.tabs.sendMessage(tab.id, { action: 'extractProducts' });
-          } else {
-            throw error;
+      try {
+        results = await chrome.tabs.sendMessage(tabId, { action: 'extractProducts' });
+      } catch (error) {
+        // 如果连接失败，尝试重新注入content script
+        if (error.message.includes('Could not establish connection') || 
+            error.message.includes('Receiving end does not exist')) {
+          console.log('正在重新加载提取器...');
+          
+          const injected = await this.injectContentScript(tabId);
+          if (!injected) {
+            throw new Error('无法注入内容脚本');
           }
+          
+          // 等待一下让content script初始化
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // 重新尝试发送消息
+          results = await chrome.tabs.sendMessage(tabId, { action: 'extractProducts' });
+        } else {
+          throw error;
         }
-      } else {
-        throw new Error('无法在当前环境中执行商品提取');
       }
       
       if (results && results.success && results.data) {
-        const extractedData = results.data;
-        displayProducts(extractedData);
-        
-        if (extractedData.error) {
-          showStatus(`提取完成，但有错误: ${extractedData.error}`, 'warning');
-        } else {
-          showStatus(`成功提取 ${extractedData.total} 个商品！`, 'success');
-        }
+        return results.data;
       } else {
         const errorMsg = results && results.error ? results.error : '未找到商品信息';
         throw new Error(errorMsg);
       }
     } catch (error) {
       console.error('提取商品失败:', error);
-      showStatus('提取商品失败: ' + error.message, 'error');
-    } finally {
-      extractProductsBtn.disabled = false;
+      throw error;
+    }
+  }
+
+  // 注入content script
+  async injectContentScript(tabId) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ['src/content/content_extractor.js', 'src/content/content.js']
+      });
+      return true;
+    } catch (error) {
+      console.error('注入content script失败:', error);
+      return false;
     }
   }
   
-  // 提取商品数据的函数（注入到页面中执行）
-  async extractProductData() {
-    // 动态加载ContentExtractor
-    if (typeof ContentExtractor === 'undefined') {
-      // 如果ContentExtractor未加载，使用简单的提取逻辑
-      const products = [];
-      const productElements = document.querySelectorAll('.sm-offer-item, .offer-item, .item');
-      
-      productElements.forEach((element, index) => {
-        const titleEl = element.querySelector('.offer-title a, .title a, h3 a, .product-title');
-        const priceEl = element.querySelector('.price, .offer-price, .sm-offer-priceNum');
-        const imageEl = element.querySelector('img');
-        const linkEl = element.querySelector('a');
-        
-        if (titleEl || priceEl) {
-          products.push({
-            id: `product_${index}`,
-            title: titleEl?.textContent?.trim() || '',
-            price: priceEl?.textContent?.trim() || '',
-            image: imageEl?.src || '',
-            link: linkEl?.href || window.location.href,
-            supplier: '',
-            sales_volume: '',
-            location: ''
-          });
-        }
-      });
-      
-      return {
-        products,
-        total: products.length,
-        page_info: {
-          url: window.location.href,
-          title: document.title,
-          extraction_time: new Date().toISOString()
-        }
-      };
-    }
+  // 处理源码提取任务
+  async processSourceExtractionTask(task) {
+    const { product_urls } = task.input;
     
-    // 使用ContentExtractor进行提取
-    try {
-      // 获取提取规则
-      const rulesResponse = await fetch(chrome.runtime.getURL('assets/extraction_rules.json'));
-      const rules = await rulesResponse.json();
-      
-      const extractor = new ContentExtractor(rules);
-      return await extractor.extract();
-    } catch (error) {
-      console.error('ContentExtractor提取失败，使用备用方法:', error);
-      
-      // 备用提取逻辑
-      const products = [];
-      const productElements = document.querySelectorAll('.sm-offer-item, .offer-item, .item');
-      
-      productElements.forEach((element, index) => {
-        const titleEl = element.querySelector('.offer-title a, .title a, h3 a');
-        const priceEl = element.querySelector('.price, .offer-price, .sm-offer-priceNum');
-        const imageEl = element.querySelector('img');
-        const linkEl = element.querySelector('a');
+    if (!product_urls || product_urls.length === 0) {
+      throw new Error('没有提供商品URL');
+    }
+
+    const results = [];
+    
+    for (const url of product_urls) {
+      try {
+        console.log(`正在获取页面源码: ${url}`);
         
-        if (titleEl || priceEl) {
-          products.push({
-            id: `product_${index}`,
-            title: titleEl?.textContent?.trim() || '',
-            price: priceEl?.textContent?.trim() || '',
-            image: imageEl?.src || '',
-            link: linkEl?.href || window.location.href,
-            supplier: '',
-            sales_volume: '',
-            location: ''
+        // 打开目标网址
+        const tab = await chrome.tabs.create({
+          url: url,
+          active: false // 在后台打开，避免干扰用户
+        });
+
+        await this.waitForTabLoad(tab.id);
+        
+        // 获取页面HTML源码
+        const htmlSource = await this.getPageSource(tab.id);
+        
+        if (htmlSource) {
+          // 提交HTML到后端进行解析
+          const submitResult = await this.submitHtmlToBackend(url, htmlSource);
+          
+          results.push({
+            url: url,
+            success: true,
+            html_length: htmlSource.length,
+            task_id: submitResult.task_id
+          });
+        } else {
+          results.push({
+            url: url,
+            success: false,
+            error: '无法获取页面源码'
           });
         }
-      });
-      
-      return {
-        products,
-        total: products.length,
-        page_info: {
-          url: window.location.href,
-          title: document.title,
-          extraction_time: new Date().toISOString()
-        },
-        error: error.message
-      };
+
+        await chrome.tabs.remove(tab.id);
+        
+        // 添加延迟避免过于频繁的请求
+        if (product_urls.length > 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      } catch (error) {
+        console.error(`获取页面源码 ${url} 失败:`, error);
+        results.push({
+          url: url,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    return {
+      results: results,
+      total: results.length,
+      success_count: results.filter(r => r.success).length,
+      source: 'source_extraction'
+    };
+  }
+
+  // 获取页面HTML源码
+  async getPageSource(tabId) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { action: 'getPageSource' });
+      if (response && response.success) {
+        return response.source;
+      }
+      throw new Error('获取页面源码失败');
+    } catch (error) {
+      console.error('获取页面源码失败:', error);
+      throw error;
     }
   }
+
+  // 检测平台类型
+  detectPlatform(url) {
+    if (url.includes('1688.com') || url.includes('alibaba.com')) return 'alibaba';
+    if (url.includes('ozon.ru')) return 'ozon';
+    return 'other';
+  }
+
+  // 检测页面类型
+  detectPageType(html, url) {
+    if (html.includes('product') || html.includes('商品') || html.includes('item') || url.includes('/offer/')) {
+      return 'product';
+    }
+    if (html.includes('search') || html.includes('搜索') || html.includes('list') || url.includes('search')) {
+      return 'search';
+    }
+    return 'unknown';
+  }
+
+  // 提交HTML到后端
+  async submitHtmlToBackend(url, htmlContent) {
+    try {
+      const platform = this.detectPlatform(url);
+      const pageType = this.detectPageType(htmlContent, url);
+      
+      const payload = {
+        url: url,
+        html_content: htmlContent,
+        platform: platform,
+        page_type: pageType,
+        metadata: {
+          collected_at: new Date(),
+          content_length: htmlContent.length,
+          user_agent: navigator.userAgent,
+          source: 'extension'
+        }
+      };
+
+      console.log('提交HTML到后端:', {
+        url: url,
+        platform: platform,
+        page_type: pageType,
+        content_length: htmlContent.length
+      });
+
+      const response = await fetch(`${this.backendUrl}/api/data-collection/submit-html`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || '提交HTML失败');
+      }
+
+      console.log('HTML提交成功:', result);
+      return result;
+    } catch (error) {
+      console.error('提交HTML到后端失败:', error);
+      throw error;
+    }
+  }
+  
+  // 处理全量数据收集任务（单品收集）
+  // 已移除：processFullDataCollectionTask 函数
+  // 全量数据收集任务现在完全由后端处理，插件只负责源码获取
+  
+  // 处理深度分析任务
+  // 处理关键词收集任务
+  // 已移除：processKeywordCollectionTask 函数
+  // 关键词收集任务现在完全由后端处理
+  
+  // 已移除：processFullDataCollectionTask 函数  
+  // 全量数据收集任务现在完全由后端处理
+  
+  // 计算热度分数
+  calculateHeatScore(products) {
+    if (!products || products.length === 0) return 0;
+    
+    let score = 0;
+    products.forEach(product => {
+      // 基于销量、价格、评价等计算热度
+      if (product.sales) {
+        const sales = parseInt(product.sales.replace(/[^\d]/g, '')) || 0;
+        score += Math.min(sales / 100, 50); // 销量贡献，最多50分
+      }
+      
+      if (product.reviews) {
+        const reviews = parseInt(product.reviews.replace(/[^\d]/g, '')) || 0;
+        score += Math.min(reviews / 50, 30); // 评价数贡献，最多30分
+      }
+      
+      // 价格合理性（中等价格区间得分更高）
+      if (product.price) {
+        const price = parseFloat(product.price.replace(/[^\d.]/g, '')) || 0;
+        if (price > 10 && price < 1000) {
+          score += 20;
+        }
+      }
+    });
+    
+    return Math.round(score / products.length);
+  }
+  
+  // 导航到下一页
+  async navigateToNextPage(tabId) {
+    try {
+      const result = await chrome.tabs.sendMessage(tabId, { action: 'navigateToNextPage' });
+      return result && result.success;
+    } catch (error) {
+      console.error('翻页失败:', error);
+      return false;
+    }
+  }
+
   
   // 发送任务结果到后端
   async sendTaskResult(taskId, data, success, error = null) {
     try {
-      const response = await fetch(`${this.backendUrl}/${this.extensionId}/tasks/${taskId}/complete`, {
+      const response = await fetch(`${this.backendUrl}/tasks/result`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          data,
+          task_id: taskId,
+          extension_id: this.extensionId,
           success,
+          data,
           error
         })
       });
@@ -493,6 +894,58 @@ class ExtensionManager {
       backendUrl: this.backendUrl
     };
   }
+  
+  // 手动创建任务
+  async createManualTask(taskData) {
+    try {
+      const response = await fetch(`${this.backendUrl}/tasks/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          extension_id: this.extensionId,
+          type: taskData.type,
+          input: taskData.input
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('任务创建成功:', data.task);
+        return data.task;
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '任务创建失败');
+      }
+    } catch (error) {
+      console.error('创建任务失败:', error);
+      throw error;
+    }
+  }
+  
+  // 获取任务状态
+  async getTaskStatus(taskId) {
+    try {
+      const response = await fetch(`${this.backendUrl}/tasks/${taskId}/status`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.task;
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '获取任务状态失败');
+      }
+    } catch (error) {
+      console.error('获取任务状态失败:', error);
+      throw error;
+    }
+  }
 }
 
 // 创建扩展管理器实例
@@ -504,8 +957,8 @@ chrome.runtime.onInstalled.addListener((details) => {
   
   if (details.reason === 'install') {
     console.log('首次安装扩展');
-    // 首次安装时打开1688网页
-    openTaobaoPage();
+    // 首次安装时打开1688网页 - 已注释，避免自动打开
+    // openTaobaoPage();
   } else if (details.reason === 'update') {
     console.log('扩展已更新');
   }
@@ -514,8 +967,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 // 监听浏览器启动事件（仅在Chrome浏览器启动时触发）
 chrome.runtime.onStartup.addListener(() => {
   console.log('浏览器启动，扩展重新初始化');
-  // 浏览器启动时打开1688网页
-  openTaobaoPage();
+  // 浏览器启动时打开1688网页 - 已注释，避免自动打开
+  // openTaobaoPage();
 });
 
 
@@ -565,6 +1018,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return true;
       
+    // 新增：手动创建任务
+    case 'createTask':
+      extensionManager.createManualTask(request.taskData).then((result) => {
+        sendResponse({ success: true, task: result });
+      }).catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+      return true;
+      
+    // 新增：获取任务状态
+    case 'getTaskStatus':
+      extensionManager.getTaskStatus(request.taskId).then((status) => {
+        sendResponse({ success: true, status });
+      }).catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+      return true;
+      
     case 'openTaobaoPage':
       console.log('收到打开1688页面的请求');
       try {
@@ -576,6 +1047,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       } catch (error) {
         console.error('处理打开1688页面请求时出错:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+      return true;
+      
+    // 新增：处理网址并自动上传HTML源码
+    case 'processUrl':
+      console.log('收到处理网址的请求:', request.url);
+      try {
+        processUrlAndUploadHtml(request.url).then((result) => {
+          sendResponse({ success: true, result });
+        }).catch(error => {
+          console.error('处理网址时出错:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      } catch (error) {
+        console.error('处理网址请求时出错:', error);
         sendResponse({ success: false, error: error.message });
       }
       return true;
@@ -629,6 +1116,128 @@ async function openTaobaoPage() {
   }
 }
 
+// 处理网址并自动上传HTML源码
+const processUrlAndUploadHtml = async (url) => {
+  try {
+    console.log('开始处理网址:', url);
+    
+    // 1. 创建新标签页并导航到指定URL
+    const tab = await chrome.tabs.create({
+      url: url,
+      active: false // 在后台打开
+    });
+    
+    console.log('已创建标签页:', tab.id);
+    
+    // 2. 等待页面加载完成
+    await extensionManager.waitForTabLoad(tab.id);
+    console.log('页面加载完成');
+    
+    // 3. 获取页面HTML源码
+    const htmlContent = await getPageHtmlContent(tab.id);
+    console.log('已获取HTML源码，长度:', htmlContent.length);
+    
+    // 4. 上传HTML源码到后端
+    const uploadResult = await uploadHtmlToBackend(url, htmlContent);
+    console.log('HTML源码上传结果:', uploadResult);
+    
+    // 5. 关闭标签页
+    await chrome.tabs.remove(tab.id);
+    console.log('已关闭标签页');
+    
+    return {
+      url,
+      htmlLength: htmlContent.length,
+      uploadResult,
+      timestamp: new Date().toISOString()
+    };
+    
+  } catch (error) {
+    console.error('处理网址失败:', error);
+    throw error;
+  }
+};
+
+// 获取页面HTML内容
+const getPageHtmlContent = async (tabId) => {
+  try {
+    // 注入内容脚本获取HTML
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      function: () => {
+        return document.documentElement.outerHTML;
+      }
+    });
+    
+    if (results && results[0] && results[0].result) {
+      return results[0].result;
+    } else {
+      throw new Error('无法获取页面HTML内容');
+    }
+  } catch (error) {
+    console.error('获取页面HTML内容失败:', error);
+    throw error;
+  }
+};
+
+// 上传HTML源码到后端
+const uploadHtmlToBackend = async (url, htmlContent) => {
+  try {
+    // 检测页面平台类型
+    const detectPlatform = (url) => {
+      if (url.includes('1688.com')) return '1688';
+      if (url.includes('taobao.com')) return 'taobao';
+      if (url.includes('tmall.com')) return 'tmall';
+      if (url.includes('ozon.ru')) return 'ozon';
+      return 'unknown';
+    };
+
+    // 检测页面类型
+    const detectPageType = (html, url) => {
+      if (html.includes('product') || html.includes('商品') || html.includes('item')) {
+        return 'product';
+      }
+      if (html.includes('search') || html.includes('搜索') || html.includes('list')) {
+        return 'search';
+      }
+      return 'other';
+    };
+
+    const platform = detectPlatform(url);
+    const pageType = detectPageType(htmlContent, url);
+
+    const payload = {
+      url,
+      html_content: htmlContent,
+      platform,
+      page_type: pageType,
+      timestamp: new Date().toISOString(),
+      source: 'browser-extension-auto'
+    };
+
+    const response = await fetch(`${extensionManager.backendUrl}/api/data-collection/submit-html`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('HTML源码上传成功:', result);
+    return result;
+    
+  } catch (error) {
+    console.error('上传HTML源码失败:', error);
+    throw error;
+  }
+};
+
 // 自执行初始化函数 - 确保Service Worker启动时扩展能正确初始化
 (async function initializeExtension() {
   try {
@@ -639,22 +1248,22 @@ async function openTaobaoPage() {
       console.log('扩展管理器未注册，开始初始化...');
       await extensionManager.init();
       
-      // 初始化完成后延迟打开1688网页
-      console.log('扩展初始化完成，延迟2秒后尝试打开1688网页');
-      setTimeout(async () => {
-        await openTaobaoPage();
-      }, 2000);
+      // 初始化完成后延迟打开1688网页 - 已注释，避免自动打开
+      console.log('扩展初始化完成，延迟2秒后尝试打开1688网页 - 已禁用');
+      // setTimeout(async () => {
+      //   await openTaobaoPage();
+      // }, 2000);
     } else if (extensionManager && extensionManager.isRegistered) {
       console.log('扩展管理器已注册，重新启动心跳和任务轮询');
       // 如果已经注册但service worker重启了，重新启动心跳和任务轮询
       extensionManager.startHeartbeat();
       extensionManager.startTaskPolling();
       
-      // Service Worker重启后也尝试打开1688网页
-      console.log('Service Worker重启，延迟1秒后尝试打开1688网页');
-      setTimeout(async () => {
-        await openTaobaoPage();
-      }, 1000);
+      // Service Worker重启后也尝试打开1688网页 - 已注释，避免自动打开
+      console.log('Service Worker重启，延迟1秒后尝试打开1688网页 - 已禁用');
+      // setTimeout(async () => {
+      //   await openTaobaoPage();
+      // }, 1000);
     }
   } catch (error) {
     console.error('扩展初始化失败:', error);

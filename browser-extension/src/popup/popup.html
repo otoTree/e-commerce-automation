@@ -11,8 +11,21 @@
       <h2>页面源码查看器</h2>
       <div class="controls">
         <button id="getSource" class="btn btn-primary">获取源码</button>
-        <button id="extractProducts" class="btn btn-primary">提取商品</button>
         <button id="sendToBackend" class="btn btn-success">发送到后端</button>
+        <button id="uploadHtml" class="btn btn-warning">上传源码</button>
+        <button id="copySource" class="btn btn-secondary">复制源码</button>
+        <button id="downloadSource" class="btn btn-info">下载源码</button>
+        </div>
+        
+        <!-- 新增：自动化处理区域 -->
+        <div class="automation-section">
+            <h3>自动化处理</h3>
+            <div class="url-input-group">
+                <input type="text" id="urlInput" placeholder="输入要处理的网址..." class="form-control">
+                <button id="processUrlBtn" class="btn btn-primary">自动处理</button>
+            </div>
+            <div id="processStatus" class="status-message"></div>
+        </div>
         <button id="getServerData" class="btn btn-info">获取服务器数据</button>
         <button id="copySource" class="btn btn-secondary">复制</button>
         <button id="downloadSource" class="btn btn-secondary">下载</button>

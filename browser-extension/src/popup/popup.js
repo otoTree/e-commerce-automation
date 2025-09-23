@@ -2,6 +2,10 @@ document.addEventListener('DOMContentLoaded', function() {
   const getSourceBtn = document.getElementById('getSource');
   const extractProductsBtn = document.getElementById('extractProducts');
   const sendToBackendBtn = document.getElementById('sendToBackend');
+  const uploadHtmlBtn = document.getElementById('uploadHtml');
+  const processUrlBtn = document.getElementById('processUrlBtn');
+  const urlInput = document.getElementById('urlInput');
+  const processStatus = document.getElementById('processStatus');
   const getServerDataBtn = document.getElementById('getServerData');
   const copySourceBtn = document.getElementById('copySource');
   const downloadSourceBtn = document.getElementById('downloadSource');
@@ -91,6 +95,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // 启用复制和下载按钮
         copySourceBtn.disabled = false;
         downloadSourceBtn.disabled = false;
+        uploadHtmlBtn.disabled = false;
         
         showStatus('源码获取成功！', 'success');
       } else {
@@ -831,6 +836,677 @@ document.addEventListener('DOMContentLoaded', function() {
   if (refreshServerDataBtn) refreshServerDataBtn.disabled = true;
   if (exportServerDataBtn) exportServerDataBtn.disabled = true;
   
+  // 上传HTML源码到后端
+  const uploadHtmlToBackend = async () => {
+    if (!currentPageSource) {
+      showStatus('请先获取页面源码', 'error');
+      return;
+    }
+
+    try {
+      showStatus('正在上传HTML源码到后端...', 'info');
+      uploadHtmlBtn.disabled = true;
+
+      // 检测页面平台类型
+      const detectPlatform = (url) => {
+        if (url.includes('1688.com') || url.includes('alibaba.com')) return 'alibaba';
+        if (url.includes('ozon.ru')) return 'ozon';
+        return 'other';
+      };
+
+      // 检测页面类型
+      const detectPageType = (html, url) => {
+        if (html.includes('product') || html.includes('商品') || html.includes('item') || url.includes('/offer/')) {
+          return 'product';
+        }
+        if (html.includes('search') || html.includes('搜索') || html.includes('list') || url.includes('search')) {
+          return 'search';
+        }
+        return 'unknown';
+      };
+
+      const platform = detectPlatform(currentPageUrl);
+      const pageType = detectPageType(currentPageSource, currentPageUrl);
+
+      const payload = {
+        url: currentPageUrl,
+        html_content: currentPageSource,
+        platform,
+        page_type: pageType,
+        metadata: {
+          collected_at: new Date(),
+          content_length: currentPageSource.length,
+          user_agent: navigator.userAgent,
+          source: 'extension'
+        }
+      };
+
+      console.log('提交HTML到后端:', {
+        url: currentPageUrl,
+        platform: platform,
+        page_type: pageType,
+        content_length: currentPageSource.length
+      });
+
+      const response = await fetch('http://localhost:3001/api/data-collection/submit-html', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // 处理解析结果
+      if (result.parse_result) {
+        if (result.parse_result.success) {
+          showStatus(`HTML源码上传并解析成功！数据ID: ${result.task_id}`, 'success');
+          if (result.parse_result.product_id) {
+            console.log('商品解析成功，产品ID:', result.parse_result.product_id);
+          }
+        } else {
+          showStatus(`HTML源码上传成功，但解析失败: ${result.warning || '未知错误'}`, 'warning');
+        }
+      } else {
+        showStatus(`HTML源码上传成功！数据ID: ${result.task_id}`, 'success');
+      }
+      
+      console.log('上传结果:', result);
+    } catch (error) {
+      console.error('上传HTML源码失败:', error);
+      showStatus('上传HTML源码失败: ' + error.message, 'error');
+    } finally {
+      uploadHtmlBtn.disabled = false;
+    }
+  };
+
+  // 下载源码文件
+  function downloadSource() {
+    if (!currentPageSource) {
+      showStatus('请先获取页面源码', 'error');
+      return;
+    }
+    
+    try {
+      const blob = new Blob([currentPageSource], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      // 生成文件名
+      const urlObj = new URL(currentPageUrl);
+      const hostname = urlObj.hostname.replace(/[^a-zA-Z0-9]/g, '_');
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
+      const filename = `${hostname}_${timestamp}.html`;
+      
+      // 创建下载链接
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      URL.revokeObjectURL(url);
+      showStatus('源码文件下载成功！', 'success');
+    } catch (error) {
+      console.error('下载失败:', error);
+      showStatus('下载失败: ' + error.message, 'error');
+    }
+  }
+
+  // 获取服务器数据
+  async function getServerData() {
+    try {
+      showStatus('正在连接服务器...', 'info');
+      getServerDataBtn.disabled = true;
+      
+      // 首先注册扩展
+      await registerExtension();
+      
+      // 获取默认数据
+      const dataType = dataTypeSelect.value || '';
+      const response = await fetch(`http://localhost:3001/api/extension/${extensionId}/data?type=${dataType}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      serverData = result;
+      
+      // 显示数据
+      displayServerData(result);
+      
+      // 显示服务器数据容器
+      serverDataContainer.style.display = 'block';
+      
+      // 启用相关按钮
+      refreshServerDataBtn.disabled = false;
+      exportServerDataBtn.disabled = false;
+      
+      showStatus('服务器数据获取成功！', 'success');
+    } catch (error) {
+      console.error('获取服务器数据失败:', error);
+      showStatus('获取服务器数据失败: ' + error.message, 'error');
+    } finally {
+      getServerDataBtn.disabled = false;
+    }
+  }
+
+  // 注册扩展
+  async function registerExtension() {
+    try {
+      const response = await fetch('http://localhost:3001/api/extension/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          extensionId: extensionId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`注册失败: ${response.status}`);
+      }
+
+      console.log('扩展注册成功');
+    } catch (error) {
+      console.error('扩展注册失败:', error);
+      throw error;
+    }
+  }
+
+  // 显示服务器数据
+  function displayServerData(data) {
+    if (!data) {
+      serverDataDisplay.value = '暂无数据';
+      serverDataInfo.textContent = '';
+      return;
+    }
+
+    // 格式化JSON数据
+    const formattedData = JSON.stringify(data, null, 2);
+    serverDataDisplay.value = formattedData;
+    
+    // 显示数据信息
+    const dataSize = new Blob([formattedData]).size;
+    const timestamp = data.timestamp || new Date().toISOString();
+    serverDataInfo.innerHTML = `
+      <div class="data-info">
+        <span>数据大小: ${dataSize} 字节</span>
+        <span>更新时间: ${new Date(timestamp).toLocaleString()}</span>
+        <span>扩展ID: ${extensionId}</span>
+      </div>
+    `;
+  }
+
+  // 数据类型选择变化
+  async function onDataTypeChange() {
+    if (!serverData) {
+      return;
+    }
+    
+    const selectedType = dataTypeSelect.value;
+    if (!selectedType) {
+      displayServerData(serverData);
+      return;
+    }
+    
+    try {
+      showStatus('正在获取指定类型数据...', 'info');
+      
+      const response = await fetch(`http://localhost:3001/api/extension/${extensionId}/data?type=${selectedType}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      displayServerData(result);
+      showStatus('数据获取成功！', 'success');
+    } catch (error) {
+      console.error('获取指定类型数据失败:', error);
+      showStatus('获取数据失败: ' + error.message, 'error');
+    }
+  }
+
+  // 刷新服务器数据
+  async function refreshServerData() {
+    await getServerData();
+  }
+
+  // 导出服务器数据
+  function exportServerData() {
+    if (!serverData) {
+      showStatus('暂无服务器数据可导出', 'error');
+      return;
+    }
+    
+    try {
+      const dataToExport = serverDataDisplay.value;
+      const blob = new Blob([dataToExport], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      // 生成文件名
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
+      const dataType = dataTypeSelect.value || 'default';
+      const filename = `server_data_${dataType}_${timestamp}.json`;
+      
+      // 创建下载链接
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      URL.revokeObjectURL(url);
+      showStatus('服务器数据导出成功！', 'success');
+    } catch (error) {
+      console.error('导出失败:', error);
+      showStatus('导出失败: ' + error.message, 'error');
+    }
+  }
+  
+  // 初始化
+  async function init() {
+    // 检查是否在扩展环境中
+    if (typeof chrome === 'undefined' || !chrome.tabs) {
+      currentUrlSpan.textContent = '请在Chrome扩展环境中使用';
+      getSourceBtn.disabled = true;
+      return;
+    }
+    
+    try {
+      const tab = await getCurrentTab();
+      currentPageUrl = tab.url;
+      currentUrlSpan.textContent = currentPageUrl;
+      
+      // 获取扩展状态
+      await getExtensionStatus();
+    } catch (error) {
+      console.error('初始化失败:', error);
+      currentUrlSpan.textContent = '无法获取当前页面URL';
+    }
+  }
+  
+  // 获取扩展状态
+  async function getExtensionStatus() {
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'getExtensionStatus' });
+      if (response.success) {
+        extensionStatus = response.status;
+        extensionId = response.status.extensionId;
+        updateExtensionStatusDisplay();
+      } else {
+        console.error('获取扩展状态失败:', response.error);
+        showStatus('无法获取扩展状态', 'error');
+      }
+    } catch (error) {
+      console.error('获取扩展状态失败:', error);
+      showStatus('扩展通信失败', 'error');
+    }
+  }
+  
+  // 更新扩展状态显示
+  function updateExtensionStatusDisplay() {
+    if (!extensionStatus) return;
+    
+    // 创建状态显示元素（如果不存在）
+    let statusContainer = document.getElementById('extensionStatusContainer');
+    if (!statusContainer) {
+      statusContainer = document.createElement('div');
+      statusContainer.id = 'extensionStatusContainer';
+      statusContainer.className = 'extension-status';
+      
+      // 插入到页面顶部
+      const firstSection = document.querySelector('.section');
+      if (firstSection) {
+        firstSection.parentNode.insertBefore(statusContainer, firstSection);
+      }
+    }
+    
+    const isRegistered = extensionStatus.isRegistered;
+    const lastHeartbeat = extensionStatus.lastHeartbeat;
+    const timeSinceHeartbeat = lastHeartbeat ? Date.now() - lastHeartbeat : null;
+    
+    statusContainer.innerHTML = `
+      <h3>扩展状态</h3>
+      <div class="status-item">
+        <span class="status-label">扩展ID:</span>
+        <span class="status-value">${extensionStatus.extensionId}</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">注册状态:</span>
+        <span class="status-value ${isRegistered ? 'status-success' : 'status-error'}">
+          ${isRegistered ? '已注册' : '未注册'}
+        </span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">后端地址:</span>
+        <span class="status-value">${extensionStatus.backendUrl}</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">最后心跳:</span>
+        <span class="status-value">
+          ${lastHeartbeat ? 
+            `${Math.floor(timeSinceHeartbeat / 1000)}秒前` : 
+            '无记录'
+          }
+        </span>
+      </div>
+      <div class="status-actions">
+        <button id="forceRegisterBtn" class="btn btn-small">重新注册</button>
+        <button id="forceHeartbeatBtn" class="btn btn-small">发送心跳</button>
+        <button id="refreshStatusBtn" class="btn btn-small">刷新状态</button>
+      </div>
+    `;
+    
+    // 绑定按钮事件
+    const forceRegisterBtn = document.getElementById('forceRegisterBtn');
+    const forceHeartbeatBtn = document.getElementById('forceHeartbeatBtn');
+    const refreshStatusBtn = document.getElementById('refreshStatusBtn');
+    
+    if (forceRegisterBtn) {
+      forceRegisterBtn.addEventListener('click', forceRegister);
+    }
+    if (forceHeartbeatBtn) {
+      forceHeartbeatBtn.addEventListener('click', forceHeartbeat);
+    }
+    if (refreshStatusBtn) {
+      refreshStatusBtn.addEventListener('click', getExtensionStatus);
+    }
+  }
+  
+  // 强制重新注册
+  async function forceRegister() {
+    try {
+      showStatus('正在重新注册...', 'info');
+      const response = await chrome.runtime.sendMessage({ action: 'forceRegister' });
+      if (response.success) {
+        showStatus('重新注册成功', 'success');
+        await getExtensionStatus(); // 刷新状态
+      } else {
+        showStatus('重新注册失败: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('重新注册失败:', error);
+      showStatus('重新注册失败', 'error');
+    }
+  }
+  
+  // 强制发送心跳
+  async function forceHeartbeat() {
+    try {
+      showStatus('正在发送心跳...', 'info');
+      const response = await chrome.runtime.sendMessage({ action: 'forceHeartbeat' });
+      if (response.success) {
+        showStatus('心跳发送成功', 'success');
+        await getExtensionStatus(); // 刷新状态
+      } else {
+        showStatus('心跳发送失败: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('心跳发送失败:', error);
+      showStatus('心跳发送失败', 'error');
+    }
+  }
+  
+  // 搜索商品
+  function searchProducts() {
+    if (!extractedProductsData || !extractedProductsData.products) return;
+    
+    const query = searchInput.value.toLowerCase().trim();
+    if (!query) {
+      filteredProducts = [...extractedProductsData.products];
+    } else {
+      filteredProducts = extractedProductsData.products.filter(product => {
+        return (product.title && product.title.toLowerCase().includes(query)) ||
+               (product.supplier && product.supplier.toLowerCase().includes(query)) ||
+               (product.specifications && product.specifications.toLowerCase().includes(query)) ||
+               (product.tags && product.tags.some(tag => tag.toLowerCase().includes(query)));
+      });
+    }
+    
+    sortAndRenderProducts();
+  }
+  
+  // 排序商品
+  function sortProducts(products) {
+    const sortType = sortSelect.value;
+    const sorted = [...products];
+    
+    switch (sortType) {
+      case 'price-asc':
+        sorted.sort((a, b) => {
+          const priceA = parseFloat(a.price?.replace(/[^\d.]/g, '') || '0');
+          const priceB = parseFloat(b.price?.replace(/[^\d.]/g, '') || '0');
+          return priceA - priceB;
+        });
+        break;
+      case 'price-desc':
+        sorted.sort((a, b) => {
+          const priceA = parseFloat(a.price?.replace(/[^\d.]/g, '') || '0');
+          const priceB = parseFloat(b.price?.replace(/[^\d.]/g, '') || '0');
+          return priceB - priceA;
+        });
+        break;
+      case 'sales-desc':
+        sorted.sort((a, b) => {
+          const salesA = parseInt(a.sales?.replace(/[^\d]/g, '') || '0');
+          const salesB = parseInt(b.sales?.replace(/[^\d]/g, '') || '0');
+          return salesB - salesA;
+        });
+        break;
+      case 'rating-desc':
+        sorted.sort((a, b) => {
+          const ratingA = parseFloat(a.rating?.replace(/[^\d.]/g, '') || '0');
+          const ratingB = parseFloat(b.rating?.replace(/[^\d.]/g, '') || '0');
+          return ratingB - ratingA;
+        });
+        break;
+      default:
+        // 保持原始顺序
+        break;
+    }
+    
+    return sorted;
+  }
+  
+  // 排序并渲染商品
+  function sortAndRenderProducts() {
+    const sorted = sortProducts(filteredProducts);
+    renderProductsList(sorted);
+    
+    // 更新摘要信息
+    const summaryDiv = document.getElementById('productsSummary');
+    const total = extractedProductsData ? extractedProductsData.total : 0;
+    const filtered = sorted.length;
+    summaryDiv.innerHTML = `共找到 ${total} 个商品${filtered !== total ? ` (筛选后: ${filtered} 个)` : ''}${extractedProductsData?.source_length ? ` (源码长度: ${extractedProductsData.source_length.toLocaleString()} 字符)` : ''}`;
+  }
+  
+  // 导出商品数据
+  function exportProducts() {
+    if (!extractedProductsData || !extractedProductsData.products || extractedProductsData.products.length === 0) {
+      showStatus('没有可导出的商品数据', 'error');
+      return;
+    }
+    
+    try {
+      const exportData = {
+        url: currentPageUrl,
+        timestamp: new Date().toISOString(),
+        total: extractedProductsData.total,
+        products: extractedProductsData.products
+      };
+      
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      // 生成文件名
+      const urlObj = new URL(currentPageUrl);
+      const hostname = urlObj.hostname.replace(/[^a-zA-Z0-9]/g, '_');
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
+      const filename = `products_${hostname}_${timestamp}.json`;
+      
+      // 创建下载链接
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      URL.revokeObjectURL(url);
+      showStatus(`成功导出 ${extractedProductsData.total} 个商品数据！`, 'success');
+    } catch (error) {
+      console.error('导出失败:', error);
+      showStatus('导出失败: ' + error.message, 'error');
+    }
+  }
+  
+  // 切换视图模式
+  function toggleView() {
+    isCompactView = !isCompactView;
+    toggleViewBtn.textContent = isCompactView ? '详细视图' : '紧凑视图';
+    
+    if (isCompactView) {
+      productsResult.classList.add('compact-view');
+    } else {
+      productsResult.classList.remove('compact-view');
+    }
+    
+    // 重新渲染当前显示的商品
+    if (filteredProducts.length > 0) {
+      sortAndRenderProducts();
+    }
+  }
+  
+  // 绑定事件
+  getSourceBtn.addEventListener('click', getPageSource);
+  extractProductsBtn.addEventListener('click', extractProducts);
+  sendToBackendBtn.addEventListener('click', sendProductsToBackend);
+  uploadHtmlBtn.addEventListener('click', uploadHtmlToBackend);
+  processUrlBtn.addEventListener('click', processUrlAutomatically);
+  copySourceBtn.addEventListener('click', copySourceToClipboard);
+  downloadSourceBtn.addEventListener('click', downloadSource);
+  
+  // 新功能事件绑定
+  if (searchInput) {
+    searchInput.addEventListener('input', searchProducts);
+  }
+  if (sortSelect) {
+    sortSelect.addEventListener('change', sortAndRenderProducts);
+  }
+  if (exportBtn) {
+    exportBtn.addEventListener('click', exportProducts);
+  }
+  if (toggleViewBtn) {
+    toggleViewBtn.addEventListener('click', toggleView);
+  }
+  
+  // 服务器数据相关事件绑定
+  if (getServerDataBtn) {
+    getServerDataBtn.addEventListener('click', getServerData);
+  }
+  if (dataTypeSelect) {
+    dataTypeSelect.addEventListener('change', onDataTypeChange);
+  }
+  if (refreshServerDataBtn) {
+    refreshServerDataBtn.addEventListener('click', refreshServerData);
+  }
+  if (exportServerDataBtn) {
+    exportServerDataBtn.addEventListener('click', exportServerData);
+  }
+  
+  // 初始化时禁用相关按钮
+  sendToBackendBtn.disabled = true;
+  uploadHtmlBtn.disabled = true;
+  processUrlBtn.disabled = false; // 自动处理按钮始终可用
+  if (exportBtn) exportBtn.disabled = true;
+  if (refreshServerDataBtn) refreshServerDataBtn.disabled = true;
+  if (exportServerDataBtn) exportServerDataBtn.disabled = true;
+  
   // 初始化插件
   init();
+  
+  // 自动处理网址功能
+  async function processUrlAutomatically() {
+    const url = urlInput.value.trim();
+    
+    if (!url) {
+      showProcessStatus('请输入要处理的网址', 'error');
+      return;
+    }
+    
+    // 验证URL格式
+    try {
+      new URL(url);
+    } catch (error) {
+      showProcessStatus('请输入有效的网址格式', 'error');
+      return;
+    }
+    
+    try {
+      processUrlBtn.disabled = true;
+      processUrlBtn.textContent = '处理中...';
+      showProcessStatus('正在自动处理网址，请稍候...', 'info');
+      
+      // 发送消息到后台脚本进行自动处理
+      const response = await chrome.runtime.sendMessage({
+        action: 'processUrl',
+        url: url
+      });
+      
+      if (response.success) {
+        const result = response.result;
+        showProcessStatus(
+          `处理成功！网址: ${result.url}, HTML长度: ${result.htmlLength} 字符, 上传时间: ${new Date(result.timestamp).toLocaleString()}`,
+          'success'
+        );
+        
+        // 清空输入框
+        urlInput.value = '';
+      } else {
+        showProcessStatus(`处理失败: ${response.error}`, 'error');
+      }
+      
+    } catch (error) {
+      console.error('自动处理网址失败:', error);
+      showProcessStatus(`处理失败: ${error.message}`, 'error');
+    } finally {
+      processUrlBtn.disabled = false;
+      processUrlBtn.textContent = '自动处理';
+    }
+  }
+  
+  // 显示处理状态
+  function showProcessStatus(message, type) {
+    processStatus.textContent = message;
+    processStatus.className = `status-message ${type}`;
+    
+    // 成功或错误消息5秒后自动隐藏
+    if (type === 'success' || type === 'error') {
+      setTimeout(() => {
+        processStatus.className = 'status-message';
+        processStatus.textContent = '';
+      }, 5000);
+    }
+  }
 });

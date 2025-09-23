@@ -75,15 +75,26 @@ npm start
 ## API 文档
 
 ### 📖 完整API文档
-查看 [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) 获取详细的API文档，包括：
+查看 <mcfile name="API_ROUTES_DOCUMENTATION.md" path="/Users/huangjiarui/Desktop/e-commerce-ai/backend/API_ROUTES_DOCUMENTATION.md"></mcfile> 获取详细的API文档，包括：
 - 所有端点的详细说明
 - 请求/响应格式
-- 数据模型定义
+- 参数说明和验证规则
 - 错误代码说明
-- 使用示例
+- 认证要求
 
 ### 🚀 快速参考
-查看 [API_OVERVIEW.md](./API_OVERVIEW.md) 获取API快速参考指南。
+查看 <mcfile name="API_QUICK_REFERENCE.md" path="/Users/huangjiarui/Desktop/e-commerce-ai/backend/API_QUICK_REFERENCE.md"></mcfile> 获取API快速参考指南，包括：
+- 端点概览表格
+- 核心参数说明
+- 常用响应格式
+- 状态码说明
+
+### 💡 使用示例
+查看 <mcfile name="API_EXAMPLES.md" path="/Users/huangjiarui/Desktop/e-commerce-ai/backend/API_EXAMPLES.md"></mcfile> 获取实际的API使用示例，包括：
+- 完整的请求/响应示例
+- cURL命令示例
+- 错误处理示例
+- 最佳实践建议
 
 ### 📮 Postman 集合
 导入 [postman_collection.json](./postman_collection.json) 到Postman中，快速测试所有API端点。

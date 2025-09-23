@@ -19,7 +19,7 @@ const TaskSchema = new Schema({
     },
     type: {
         type: String,
-        enum: ['data_collection', 'content_generation', 'analysis', 'optimization', 'custom'],
+        enum: ['data_collection', 'content_generation', 'analysis', 'optimization', 'custom', 'operation'],
         required: true
     },
     // 任务配置
@@ -78,6 +78,96 @@ const TaskSchema = new Schema({
                 max_value: { type: Number },
                 rules: [{ type: String }]
             }
+        }
+    },
+    // 运营任务特定字段
+    operation_config: {
+        product_info: {
+            product_id: { type: String },
+            product_name: { type: String },
+            product_image: { type: String },
+            category: { type: String },
+            source_platform: { type: String }
+        },
+        target_platforms: [{
+                platform: { type: String, required: true },
+                config: {
+                    category_id: { type: String },
+                    attributes: { type: Schema.Types.Mixed },
+                    pricing_strategy: {
+                        type: String,
+                        enum: ['fixed', 'dynamic', 'competitive']
+                    },
+                    inventory_sync: { type: Boolean, default: false }
+                }
+            }],
+        modules: {
+            analysis: {
+                enabled: { type: Boolean, default: true },
+                custom_requirements: { type: String },
+                analysis_type: {
+                    type: String,
+                    enum: ['basic', 'comprehensive', 'custom'],
+                    default: 'basic'
+                }
+            },
+            content_generation: {
+                enabled: { type: Boolean, default: true },
+                target_languages: [{ type: String }],
+                content_types: [{ type: String }],
+                tone: {
+                    type: String,
+                    enum: ['professional', 'casual', 'persuasive']
+                }
+            },
+            marketing: {
+                enabled: { type: Boolean, default: true },
+                budget_range: {
+                    min: { type: Number, min: 0 },
+                    max: { type: Number, min: 0 }
+                },
+                preferred_channels: [{ type: String }]
+            },
+            tracking: {
+                enabled: { type: Boolean, default: true },
+                kpi_targets: { type: Schema.Types.Mixed }
+            }
+        }
+    },
+    operation_progress: {
+        analysis: {
+            type: String,
+            enum: ['pending', 'in_progress', 'completed', 'failed', 'skipped'],
+            default: 'pending'
+        },
+        content: {
+            type: String,
+            enum: ['pending', 'in_progress', 'completed', 'failed', 'skipped'],
+            default: 'pending'
+        },
+        marketing: {
+            type: String,
+            enum: ['pending', 'in_progress', 'completed', 'failed', 'skipped'],
+            default: 'pending'
+        },
+        tracking: {
+            type: String,
+            enum: ['pending', 'in_progress', 'completed', 'failed', 'skipped'],
+            default: 'pending'
+        }
+    },
+    operation_results: {
+        analysisScore: { type: Number, min: 0, max: 100 },
+        contentGenerated: { type: Number, min: 0, default: 0 },
+        marketingPlansCreated: { type: Number, min: 0, default: 0 },
+        performanceMetrics: {
+            views: { type: Number, min: 0, default: 0 },
+            clicks: { type: Number, min: 0, default: 0 },
+            conversions: { type: Number, min: 0, default: 0 },
+            revenue: { type: Number, min: 0, default: 0 },
+            ctr: { type: Number, min: 0, max: 1, default: 0 },
+            cvr: { type: Number, min: 0, max: 1, default: 0 },
+            roas: { type: Number, min: 0, default: 0 }
         }
     },
     // 执行设置

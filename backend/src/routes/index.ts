@@ -1,30 +1,48 @@
 import { Router } from 'express';
-import type { Request, Response } from 'express';
-import extensionRoutes from './extension.js';
-import taskRoutes from './tasks.js';
-import productRoutes from './products.js';
-import { extensionService } from '../services/extensionService.js';
+import dataCollectionRoutes from './dataCollection.js';
+import analysisRoutes from './analysis.js';
+import taskMonitorRoutes from './taskMonitor.js';
+import productManagementRoutes from './productManagement.js';
+import productListingRoutes from './productListing.js';
+import extensionManagementRoutes from './extensionManagement.js';
 
 const router = Router();
 
-// 基础路由
-router.get('/', (req: Request, res: Response) => {
-  res.json({ message: 'E-commerce AI Backend API is running!' });
+// 挂载各模块路由（不需要API_PREFIX，因为在主应用中已经添加了/api前缀）
+router.use('/data-collection', dataCollectionRoutes);
+router.use('/analysis', analysisRoutes);
+router.use('/tasks', taskMonitorRoutes);
+router.use('/products', productManagementRoutes);
+router.use('/listings', productListingRoutes);
+router.use('/extension', extensionManagementRoutes);
+
+// API健康检查端点
+router.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'E-commerce AI API is running',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
 });
 
-router.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// API根路径信息
+router.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'E-commerce AI API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      data_collection: '/api/data-collection',
+      analysis: '/api/analysis',
+      tasks: '/api/tasks',
+      products: '/api/products',
+      listings: '/api/listings',
+      extension: '/api/extension'
+    },
+    documentation: 'https://github.com/your-repo/e-commerce-ai/docs'
+  });
 });
-
-// 获取已注册扩展列表
-router.get('/extensions', (req: Request, res: Response) => {
-  const extensions = extensionService.getAllExtensions();
-  res.json({ extensions });
-});
-
-// 挂载子路由
-router.use('/extension', extensionRoutes);
-router.use('/tasks', taskRoutes);
-router.use('/products', productRoutes);
 
 export default router;
