@@ -1,115 +1,83 @@
-import mongoose, { Document, Schema } from 'mongoose';
-// 用户Schema定义
-const UserSchema = new Schema({
-    username: {
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.User = exports.UpdateUserSchema = exports.CreateUserSchema = exports.UserSchema = void 0;
+const mongoose_1 = __importStar(require("mongoose"));
+const zod_1 = require("zod");
+exports.UserSchema = zod_1.z.object({
+    name: zod_1.z.string().min(2, 'Name must be at least 2 characters'),
+    email: zod_1.z.string().email('Invalid email format'),
+    password: zod_1.z.string().min(6, 'Password must be at least 6 characters'),
+    role: zod_1.z.enum(['user', 'admin']).default('user'),
+    isActive: zod_1.z.boolean().default(true),
+    createdAt: zod_1.z.date().optional(),
+    updatedAt: zod_1.z.date().optional(),
+});
+exports.CreateUserSchema = exports.UserSchema.omit({ createdAt: true, updatedAt: true });
+exports.UpdateUserSchema = exports.UserSchema.partial().omit({ createdAt: true, updatedAt: true });
+const mongooseUserSchema = new mongoose_1.Schema({
+    name: {
         type: String,
-        required: [true, '用户名为必填字段'],
-        unique: true,
+        required: true,
         trim: true,
-        minlength: [3, '用户名至少需要3个字符'],
-        maxlength: [30, '用户名不能超过30个字符'],
-        match: [/^[a-zA-Z0-9_]+$/, '用户名只能包含字母、数字和下划线']
+        minlength: 2,
     },
     email: {
         type: String,
-        required: [true, '邮箱为必填字段'],
+        required: true,
         unique: true,
-        trim: true,
         lowercase: true,
-        match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, '请输入有效的邮箱地址']
+        trim: true,
     },
     password: {
         type: String,
-        required: [true, '密码为必填字段'],
-        minlength: [6, '密码至少需要6个字符']
-    },
-    firstName: {
-        type: String,
-        trim: true,
-        maxlength: [50, '名字不能超过50个字符']
-    },
-    lastName: {
-        type: String,
-        trim: true,
-        maxlength: [50, '姓氏不能超过50个字符']
-    },
-    phone: {
-        type: String,
-        trim: true,
-        match: [/^[+]?[\d\s\-()]+$/, '请输入有效的手机号码']
+        required: true,
+        minlength: 6,
     },
     role: {
         type: String,
-        enum: ['admin', 'user', 'moderator'],
-        default: 'user'
+        enum: ['user', 'admin'],
+        default: 'user',
     },
     isActive: {
         type: Boolean,
-        default: true
+        default: true,
     },
-    lastLoginAt: {
-        type: Date
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now
-    }
 }, {
-    timestamps: true, // 自动管理createdAt和updatedAt
-    collection: 'users'
+    timestamps: true,
 });
-// 索引定义
-UserSchema.index({ username: 1 }, { unique: true });
-UserSchema.index({ email: 1 }, { unique: true });
-UserSchema.index({ createdAt: -1 });
-UserSchema.index({ isActive: 1 });
-// 中间件：更新时自动设置updatedAt
-UserSchema.pre('save', function (next) {
-    if (this.isModified() && !this.isNew) {
-        this.updatedAt = new Date();
-    }
-    next();
-});
-// 实例方法：获取用户全名
-UserSchema.methods.getFullName = function () {
-    return `${this.firstName || ''} ${this.lastName || ''}`.trim() || this.username;
-};
-// 实例方法：检查用户是否为管理员
-UserSchema.methods.isAdmin = function () {
-    return this.role === 'admin';
-};
-// 静态方法：根据用户名或邮箱查找用户
-UserSchema.statics.findByUsernameOrEmail = function (identifier) {
-    return this.findOne({
-        $or: [
-            { username: identifier },
-            { email: identifier }
-        ]
-    });
-};
-// 静态方法：获取活跃用户数量
-UserSchema.statics.getActiveUserCount = function () {
-    return this.countDocuments({ isActive: true });
-};
-// 虚拟字段：用户显示名称
-UserSchema.virtual('displayName').get(function () {
-    return `${this.firstName || ''} ${this.lastName || ''}`.trim() || this.username;
-});
-// 确保虚拟字段在JSON序列化时包含
-UserSchema.set('toJSON', {
-    virtuals: true,
-    transform: function (doc, ret) {
-        // 移除敏感信息
-        delete ret.password;
-        delete ret.__v;
-        return ret;
-    }
-});
-// 创建并导出模型
-const User = mongoose.model('User', UserSchema);
-export default User;
+mongooseUserSchema.index({ email: 1 });
+exports.User = mongoose_1.default.model('User', mongooseUserSchema);
 //# sourceMappingURL=User.js.map

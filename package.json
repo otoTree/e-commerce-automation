@@ -1,5 +1,56 @@
 {
-	"dependencies": {
-		"zustand": "^5.0.8"
-	}
+  "name": "e-commerce-ai",
+  "version": "1.0.0",
+  "description": "AI-powered e-commerce assistant with browser extension and web application",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "start": "concurrently \"npm run start:frontend\" \"npm run start:backend\"",
+    "start:frontend": "cd frontend && npm start",
+    "start:backend": "cd backend && npm start",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "cd frontend && npm test",
+    "test:backend": "cd backend && npm test",
+    "lint": "npm run lint:frontend && npm run lint:backend",
+    "lint:frontend": "cd frontend && npm run lint",
+    "lint:backend": "cd backend && npm run lint",
+    "clean": "rm -rf node_modules frontend/node_modules backend/node_modules frontend/.next backend/dist",
+    "install:all": "npm install && npm run install:frontend && npm run install:backend",
+    "install:frontend": "cd frontend && npm install",
+    "install:backend": "cd backend && npm install"
+  },
+  "keywords": [
+    "e-commerce",
+    "ai",
+    "browser-extension",
+    "price-comparison",
+    "shopping-assistant",
+    "nextjs",
+    "express",
+    "mongodb"
+  ],
+  "author": "E-commerce AI Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "concurrently": "^8.2.2",
+    "ts-node": "^10.9.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "@types/cheerio": "^1.0.0",
+    "cheerio": "^1.1.2"
+  }
 }

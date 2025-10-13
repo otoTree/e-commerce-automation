@@ -1,1512 +1,406 @@
-document.addEventListener('DOMContentLoaded', function() {
-  const getSourceBtn = document.getElementById('getSource');
-  const extractProductsBtn = document.getElementById('extractProducts');
-  const sendToBackendBtn = document.getElementById('sendToBackend');
-  const uploadHtmlBtn = document.getElementById('uploadHtml');
-  const processUrlBtn = document.getElementById('processUrlBtn');
-  const urlInput = document.getElementById('urlInput');
-  const processStatus = document.getElementById('processStatus');
-  const getServerDataBtn = document.getElementById('getServerData');
-  const copySourceBtn = document.getElementById('copySource');
-  const downloadSourceBtn = document.getElementById('downloadSource');
-  const sourceCodeTextarea = document.getElementById('sourceCode');
-  const currentUrlSpan = document.getElementById('currentUrl');
-  const sourceLengthSpan = document.getElementById('sourceLength');
-  const statusDiv = document.getElementById('status');
-  const productsContainer = document.getElementById('productsContainer');
-  const productsResult = document.getElementById('productsResult');
-  const searchInput = document.getElementById('searchProducts');
-  const sortSelect = document.getElementById('sortProducts');
-  const exportBtn = document.getElementById('exportProducts');
-  const toggleViewBtn = document.getElementById('toggleView');
-  
-  // 服务器数据相关元素
-  const serverDataContainer = document.getElementById('serverDataContainer');
-  const serverDataDisplay = document.getElementById('serverDataDisplay');
-  const serverDataInfo = document.getElementById('serverDataInfo');
-  const dataTypeSelect = document.getElementById('dataTypeSelect');
-  const refreshServerDataBtn = document.getElementById('refreshServerData');
-  const exportServerDataBtn = document.getElementById('exportServerData');
-  
-  let currentPageSource = '';
-  let currentPageUrl = '';
-  let extractedProductsData = null;
-  let filteredProducts = [];
-  let isCompactView = false;
-  
-  // 服务器数据相关变量
-  let serverData = null;
-  let extensionId = null; // 从后台脚本获取
-  let extensionStatus = null;
-  
-  // 显示状态信息
-  function showStatus(message, type = 'info') {
-    statusDiv.textContent = message;
-    statusDiv.className = `status ${type}`;
-    setTimeout(() => {
-      statusDiv.textContent = '';
-      statusDiv.className = 'status';
-    }, 3000);
+// 弹窗主要逻辑
+class PopupManager {
+  constructor() {
+    this.elements = {};
+    this.connectionStatus = {
+      backend: false,
+      polling: false
+    };
+    this.taskStats = {
+      pending: 0,
+      processing: 0,
+      completed: 0
+    };
+    this.recentTasks = [];
+    this.init();
   }
-  
-  // 更新源码长度显示
-  function updateSourceLength(length) {
-    sourceLengthSpan.textContent = `源码长度：${length.toLocaleString()} 字符`;
+
+  init() {
+    this.initElements();
+    this.bindEvents();
+    this.checkStatus();
+    this.loadTaskStatus();
+    // 定期更新状态
+    setInterval(() => {
+      this.checkStatus();
+      this.loadTaskStatus();
+    }, 5000);
   }
-  
-  // 获取当前标签页信息
-  async function getCurrentTab() {
-    if (typeof chrome !== 'undefined' && chrome.tabs) {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      return tab;
-    }
-    return { url: window.location.href, id: null };
+
+  initElements() {
+    this.elements = {
+      analyzeBtn: document.getElementById('analyze-page'),
+      compareBtn: document.getElementById('price-compare'),
+      reviewBtn: document.getElementById('reviews-summary'),
+      uploadBtn: document.getElementById('upload-html'),
+      upload1688Btn: document.getElementById('upload-1688-search'),
+      settingsBtn: document.getElementById('settings-btn'),
+      refreshBtn: document.getElementById('refresh-btn'),
+      statusIndicator: document.querySelector('.status-indicator'),
+      infoSection: document.getElementById('info-section'),
+      analysisResult: document.getElementById('analysis-result'),
+      // 连接状态元素
+      backendStatus: document.getElementById('backend-status'),
+      pollingStatus: document.getElementById('polling-status'),
+      backendDot: document.getElementById('backend-dot'),
+      pollingDot: document.getElementById('polling-dot'),
+      // 任务状态元素
+      pendingCount: document.getElementById('pending-count'),
+      processingCount: document.getElementById('processing-count'),
+      completedCount: document.getElementById('completed-count'),
+      recentTasksList: document.getElementById('recent-tasks-list')
+    };
   }
-  
-  // 获取页面源码
-  async function getPageSource() {
+
+  bindEvents() {
+    this.elements.analyzeBtn?.addEventListener('click', () => this.analyzePage());
+    this.elements.compareBtn?.addEventListener('click', () => this.comparePrices());
+    this.elements.reviewBtn?.addEventListener('click', () => this.summarizeReviews());
+    this.elements.uploadBtn?.addEventListener('click', () => this.uploadPageHTML());
+    this.elements.upload1688Btn?.addEventListener('click', () => this.upload1688SearchData());
+    this.elements.settingsBtn?.addEventListener('click', () => this.openSettings());
+    this.elements.refreshBtn?.addEventListener('click', () => this.refreshStatus());
+  }
+
+  async checkStatus() {
     try {
-      showStatus('正在获取页面源码...', 'info');
-      getSourceBtn.disabled = true;
-      
-      const tab = await getCurrentTab();
-      currentPageUrl = tab.url;
-      currentUrlSpan.textContent = currentPageUrl;
-      
-      // 注入脚本获取页面源码
-      let results;
-      if (typeof chrome !== 'undefined' && chrome.scripting && tab.id) {
-        results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          function: () => {
-            return document.documentElement.outerHTML;
-          }
-        });
-      } else {
-        // 在非扩展环境中直接获取当前页面源码
-        results = [{ result: document.documentElement.outerHTML }];
-      }
-      
-      if (results && results[0] && results[0].result) {
-        currentPageSource = results[0].result;
-        sourceCodeTextarea.value = currentPageSource;
-        updateSourceLength(currentPageSource.length);
-        
-        // 启用复制和下载按钮
-        copySourceBtn.disabled = false;
-        downloadSourceBtn.disabled = false;
-        uploadHtmlBtn.disabled = false;
-        
-        showStatus('源码获取成功！', 'success');
-      } else {
-        throw new Error('无法获取页面源码');
-      }
-    } catch (error) {
-      console.error('获取源码失败:', error);
-      showStatus('获取源码失败: ' + error.message, 'error');
-    } finally {
-      getSourceBtn.disabled = false;
-    }
-  }
-  
-  // 复制源码到剪贴板
-  async function copySourceToClipboard() {
-    if (!currentPageSource) {
-      showStatus('请先获取页面源码', 'error');
-      return;
-    }
-    
-    try {
-      await navigator.clipboard.writeText(currentPageSource);
-      showStatus('源码已复制到剪贴板！', 'success');
-    } catch (error) {
-      console.error('复制失败:', error);
-      showStatus('复制失败: ' + error.message, 'error');
-    }
-  }
-  
-  // 注入content script
-  async function injectContentScript(tabId) {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ['content.js']
+      // 检查后端API连接状态
+      const response = await fetch('http://localhost:3001/health', {
+        method: 'GET',
+        timeout: 3000
       });
-      return true;
+      
+      if (response.ok) {
+        this.connectionStatus.backend = true;
+        this.updateBackendStatus(true);
+      } else {
+        this.connectionStatus.backend = false;
+        this.updateBackendStatus(false);
+      }
     } catch (error) {
-      console.error('注入content script失败:', error);
-      return false;
+      console.error('Backend status check failed:', error);
+      this.connectionStatus.backend = false;
+      this.updateBackendStatus(false);
     }
+
+    // 检查任务轮询状态
+    this.checkPollingStatus();
   }
-  
-  // 提取商品信息
-  async function extractProducts() {
+
+  async checkPollingStatus() {
     try {
-      showStatus('正在提取商品信息...', 'info');
-      extractProductsBtn.disabled = true;
+      // 向background script查询轮询状态
+      const response = await chrome.runtime.sendMessage({
+        action: 'getPollingStatus'
+      });
       
-      const tab = await getCurrentTab();
-      
-      if (!tab.id) {
-        throw new Error('无法获取当前标签页ID');
-      }
-      
-      // 使用content.js中的1688专用提取器
-      let results;
-      if (typeof chrome !== 'undefined' && chrome.tabs) {
-        try {
-          // 尝试发送消息给content script
-          results = await chrome.tabs.sendMessage(tab.id, { action: 'extractProducts' });
-        } catch (error) {
-          // 如果连接失败，尝试重新注入content script
-          if (error.message.includes('Could not establish connection') || 
-              error.message.includes('Receiving end does not exist')) {
-            showStatus('正在重新加载提取器...', 'info');
-            
-            const injected = await injectContentScript(tab.id);
-            if (!injected) {
-              throw new Error('无法注入内容脚本');
-            }
-            
-            // 等待一下让content script初始化
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // 重新尝试发送消息
-            results = await chrome.tabs.sendMessage(tab.id, { action: 'extractProducts' });
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        throw new Error('无法在当前环境中执行商品提取');
-      }
-      
-      if (results && results.success && results.data) {
-        const extractedData = results.data;
-        displayProducts(extractedData);
-        
-        if (extractedData.error) {
-          showStatus(`提取完成，但有错误: ${extractedData.error}`, 'warning');
-        } else {
-          showStatus(`成功提取 ${extractedData.total} 个商品！`, 'success');
-        }
-      } else {
-        const errorMsg = results && results.error ? results.error : '未找到商品信息';
-        throw new Error(errorMsg);
-      }
+      console.log('Polling status response:', response);
+      this.connectionStatus.polling = response?.isPolling || false;
+      this.updatePollingStatus(this.connectionStatus.polling);
     } catch (error) {
-      console.error('提取商品失败:', error);
-      showStatus('提取商品失败: ' + error.message, 'error');
-    } finally {
-      extractProductsBtn.disabled = false;
+      console.error('Polling status check failed:', error);
+      this.connectionStatus.polling = false;
+      this.updatePollingStatus(false);
     }
   }
 
-  
-  // 显示提取的商品信息
-  function displayProducts(data) {
-    extractedProductsData = data; // 保存提取的商品数据
-    filteredProducts = [...data.products]; // 初始化过滤后的商品数据
-    sendToBackendBtn.disabled = false; // 启用发送按钮
-    if (exportBtn) exportBtn.disabled = false; // 启用导出按钮
-    productsContainer.style.display = 'block';
-    
-    // 更新摘要信息
-    const summaryDiv = document.getElementById('productsSummary');
-    summaryDiv.innerHTML = `共找到 ${data.total} 个商品${data.source_length ? ` (源码长度: ${data.source_length.toLocaleString()} 字符)` : ''}`;
-    
-    if (data.products.length === 0) {
-      productsResult.innerHTML = '<p class="no-products">未找到商品信息</p>';
+  async loadTaskStatus() {
+    if (!this.connectionStatus.backend) {
+      this.updateTaskStats({ pending: 0, processing: 0, completed: 0 });
+      this.updateRecentTasks([]);
       return;
     }
-    
-    renderProductsList(data.products);
+
+    try {
+      // 获取任务统计
+      const statsResponse = await fetch('http://localhost:3001/api/tasks/stats/overview');
+      if (statsResponse.ok) {
+        const stats = await statsResponse.json();
+        this.updateTaskStats(stats);
+      }
+
+      // 获取最近任务
+      const tasksResponse = await fetch('http://localhost:3001/api/tasks?limit=5&sort=-createdAt');
+      if (tasksResponse.ok) {
+        const tasksData = await tasksResponse.json();
+        this.updateRecentTasks(tasksData.tasks || []);
+      }
+    } catch (error) {
+      console.error('Failed to load task status:', error);
+    }
   }
-  
-  // 渲染商品列表
-  function renderProductsList(products) {
-    let html = '';
+
+  updateBackendStatus(isOnline) {
+    if (this.elements.backendStatus) {
+      this.elements.backendStatus.textContent = isOnline ? '已连接' : '未连接';
+    }
+    if (this.elements.backendDot) {
+      this.elements.backendDot.className = `status-dot ${isOnline ? 'online' : 'offline'}`;
+    }
+    // 更新主状态指示器
+    this.updateMainStatusIndicator();
+  }
+
+  updatePollingStatus(isPolling) {
+    if (this.elements.pollingStatus) {
+      this.elements.pollingStatus.textContent = isPolling ? '运行中' : '已停止';
+    }
+    if (this.elements.pollingDot) {
+      this.elements.pollingDot.className = `status-dot ${isPolling ? 'online' : 'offline'}`;
+    }
+    // 更新主状态指示器
+    this.updateMainStatusIndicator();
+  }
+
+  updateMainStatusIndicator() {
+    const isHealthy = this.connectionStatus.backend && this.connectionStatus.polling;
+    if (this.elements.statusIndicator) {
+      this.elements.statusIndicator.style.background = isHealthy ? '#4ade80' : '#ef4444';
+      this.elements.statusIndicator.style.boxShadow = isHealthy 
+        ? '0 0 6px rgba(74, 222, 128, 0.6)' 
+        : '0 0 6px rgba(239, 68, 68, 0.6)';
+    }
+  }
+
+  updateTaskStats(stats) {
+    this.taskStats = {
+      pending: stats.pending || 0,
+      processing: stats.processing || 0,
+      completed: stats.completed || 0
+    };
+
+    if (this.elements.pendingCount) {
+      this.elements.pendingCount.textContent = this.taskStats.pending;
+    }
+    if (this.elements.processingCount) {
+      this.elements.processingCount.textContent = this.taskStats.processing;
+    }
+    if (this.elements.completedCount) {
+      this.elements.completedCount.textContent = this.taskStats.completed;
+    }
+  }
+
+  updateRecentTasks(tasks) {
+    this.recentTasks = tasks;
     
-    products.forEach((product, index) => {
-      // 构建商品状态
-      let statusHtml = '';
-      if (product.status) {
-        const statusClass = product.status === '有库存' ? 'status-available' : 
-                           product.status === '库存紧张' ? 'status-limited' : 'status-unavailable';
-        statusHtml = `<span class="product-status ${statusClass}">${product.status}</span>`;
-      }
+    if (!this.elements.recentTasksList) return;
+
+    if (tasks.length === 0) {
+      this.elements.recentTasksList.innerHTML = '<div class="no-tasks">暂无任务</div>';
+      return;
+    }
+
+    const tasksHtml = tasks.map(task => {
+      const statusClass = this.getTaskStatusClass(task.status);
+      const statusText = this.getTaskStatusText(task.status);
       
-      // 构建标签
-      let tagsHtml = '';
-      if (product.tags && product.tags.length > 0) {
-        tagsHtml = `<div class="product-tags">${product.tags.map(tag => `<span class="product-tag">${tag}</span>`).join('')}</div>`;
-      }
-      
-      // 构建规格信息
-      let specsHtml = '';
-      if (product.specifications) {
-        specsHtml = `<div class="product-specs">规格: ${product.specifications}</div>`;
-      }
-      
-      html += `
-        <div class="product-item" data-index="${index}">
-          <div class="product-header">
-            <span class="product-index">#${index + 1}</span>
-            <div class="product-main">
-              <h4 class="product-title">${product.title || '无标题'} ${statusHtml}</h4>
-              <div class="product-content">
-                <div class="product-details">
-                  <div class="product-info-grid">
-                    ${product.price ? `<div class="product-info-item product-price"><span class="product-info-label">价格:</span>${product.price}</div>` : ''}
-                    ${product.sales ? `<div class="product-info-item product-sales"><span class="product-info-label">销量:</span>${product.sales}</div>` : ''}
-                    ${product.rating ? `<div class="product-info-item product-rating"><span class="product-info-label">评分:</span>${product.rating}</div>` : ''}
-                    ${product.reviewCount ? `<div class="product-info-item"><span class="product-info-label">评价:</span>${product.reviewCount}</div>` : ''}
-                    ${product.supplier ? `<div class="product-info-item product-supplier"><span class="product-info-label">供应商:</span>${product.supplier}</div>` : ''}
-                    ${product.location ? `<div class="product-info-item product-location"><span class="product-info-label">发货地:</span>${product.location}</div>` : ''}
-                    ${product.moq ? `<div class="product-info-item product-moq"><span class="product-info-label">起订量:</span>${product.moq}</div>` : ''}
-                    ${product.delivery ? `<div class="product-info-item"><span class="product-info-label">发货:</span>${product.delivery}</div>` : ''}
-                  </div>
-                  ${specsHtml}
-                  ${tagsHtml}
-                  ${product.link ? `<div class="product-link"><a href="${product.link}" target="_blank">🔗 查看详情</a></div>` : ''}
-                </div>
-                ${product.image ? `<div class="product-image"><img src="${product.image}" alt="商品图片" loading="lazy"></div>` : ''}
-              </div>
-            </div>
-          </div>
+      return `
+        <div class="task-item">
+          <span class="task-title" title="${task.title}">${task.title}</span>
+          <span class="task-status-badge ${statusClass}">${statusText}</span>
         </div>
       `;
-    });
-    
-    productsResult.innerHTML = html;
+    }).join('');
+
+    this.elements.recentTasksList.innerHTML = tasksHtml;
   }
 
-  // 发送商品信息到后端
-  async function sendProductsToBackend() {
-    if (!extractedProductsData || !extractedProductsData.products || extractedProductsData.products.length === 0) {
-      showStatus('请先提取商品信息', 'error');
-      return;
-    }
-
-    try {
-      showStatus('正在发送商品信息到后端...', 'info');
-      sendToBackendBtn.disabled = true;
-
-      const payload = {
-        url: currentPageUrl,
-        timestamp: new Date().toISOString(),
-        products: extractedProductsData.products,
-        total: extractedProductsData.total,
-        source: 'browser-extension'
-      };
-
-      const response = await fetch('http://localhost:3001/api/products/import/1688', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      showStatus(`成功发送 ${extractedProductsData.total} 个商品到后端！`, 'success');
-      console.log('发送结果:', result);
-    } catch (error) {
-      console.error('发送到后端失败:', error);
-      showStatus('发送到后端失败: ' + error.message, 'error');
-    } finally {
-      sendToBackendBtn.disabled = false;
-    }
+  getTaskStatusClass(status) {
+    const statusMap = {
+      'pending': 'pending',
+      'processing': 'processing',
+      'completed': 'completed',
+      'failed': 'failed'
+    };
+    return statusMap[status] || 'pending';
   }
 
-  // 下载源码文件
-  function downloadSource() {
-    if (!currentPageSource) {
-      showStatus('请先获取页面源码', 'error');
-      return;
-    }
+  getTaskStatusText(status) {
+    const statusMap = {
+      'pending': '等待中',
+      'processing': '处理中',
+      'completed': '已完成',
+      'failed': '失败'
+    };
+    return statusMap[status] || '未知';
+  }
+
+  refreshStatus() {
+    this.checkStatus();
+    this.loadTaskStatus();
+  }
+
+  async analyzePage() {
+    this.showLoading('正在分析当前页面...')
     
     try {
-      const blob = new Blob([currentPageSource], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
+      // 获取当前标签页信息
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       
-      // 生成文件名
-      const urlObj = new URL(currentPageUrl);
-      const hostname = urlObj.hostname.replace(/[^a-zA-Z0-9]/g, '_');
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
-      const filename = `${hostname}_${timestamp}.html`;
+      // 向content script发送消息
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'analyzePage'
+      })
       
-      // 创建下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      showStatus('源码文件下载成功！', 'success');
-    } catch (error) {
-      console.error('下载失败:', error);
-      showStatus('下载失败: ' + error.message, 'error');
-    }
-  }
-
-  // 获取服务器数据
-  async function getServerData() {
-    try {
-      showStatus('正在连接服务器...', 'info');
-      getServerDataBtn.disabled = true;
-      
-      // 首先注册扩展
-      await registerExtension();
-      
-      // 获取默认数据
-      const dataType = dataTypeSelect.value || '';
-      const response = await fetch(`http://localhost:3001/api/extension/${extensionId}/data?type=${dataType}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      serverData = result;
-      
-      // 显示数据
-      displayServerData(result);
-      
-      // 显示服务器数据容器
-      serverDataContainer.style.display = 'block';
-      
-      // 启用相关按钮
-      refreshServerDataBtn.disabled = false;
-      exportServerDataBtn.disabled = false;
-      
-      showStatus('服务器数据获取成功！', 'success');
-    } catch (error) {
-      console.error('获取服务器数据失败:', error);
-      showStatus('获取服务器数据失败: ' + error.message, 'error');
-    } finally {
-      getServerDataBtn.disabled = false;
-    }
-  }
-
-  // 注册扩展
-  async function registerExtension() {
-    try {
-      const response = await fetch('http://localhost:3001/api/extension/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          extensionId: extensionId
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`注册失败: ${response.status}`);
-      }
-
-      console.log('扩展注册成功');
-    } catch (error) {
-      console.error('扩展注册失败:', error);
-      throw error;
-    }
-  }
-
-  // 显示服务器数据
-  function displayServerData(data) {
-    if (!data) {
-      serverDataDisplay.value = '暂无数据';
-      serverDataInfo.textContent = '';
-      return;
-    }
-
-    // 格式化JSON数据
-    const formattedData = JSON.stringify(data, null, 2);
-    serverDataDisplay.value = formattedData;
-    
-    // 显示数据信息
-    const dataSize = new Blob([formattedData]).size;
-    const timestamp = data.timestamp || new Date().toISOString();
-    serverDataInfo.innerHTML = `
-      <div class="data-info">
-        <span>数据大小: ${dataSize} 字节</span>
-        <span>更新时间: ${new Date(timestamp).toLocaleString()}</span>
-        <span>扩展ID: ${extensionId}</span>
-      </div>
-    `;
-  }
-
-  // 数据类型选择变化
-  async function onDataTypeChange() {
-    if (!serverData) {
-      return;
-    }
-    
-    const selectedType = dataTypeSelect.value;
-    if (!selectedType) {
-      displayServerData(serverData);
-      return;
-    }
-    
-    try {
-      showStatus('正在获取指定类型数据...', 'info');
-      
-      const response = await fetch(`http://localhost:3001/api/extension/${extensionId}/data?type=${selectedType}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      displayServerData(result);
-      showStatus('数据获取成功！', 'success');
-    } catch (error) {
-      console.error('获取指定类型数据失败:', error);
-      showStatus('获取数据失败: ' + error.message, 'error');
-    }
-  }
-
-  // 刷新服务器数据
-  async function refreshServerData() {
-    await getServerData();
-  }
-
-  // 导出服务器数据
-  function exportServerData() {
-    if (!serverData) {
-      showStatus('暂无服务器数据可导出', 'error');
-      return;
-    }
-    
-    try {
-      const dataToExport = serverDataDisplay.value;
-      const blob = new Blob([dataToExport], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      // 生成文件名
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
-      const dataType = dataTypeSelect.value || 'default';
-      const filename = `server_data_${dataType}_${timestamp}.json`;
-      
-      // 创建下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      showStatus('服务器数据导出成功！', 'success');
-    } catch (error) {
-      console.error('导出失败:', error);
-      showStatus('导出失败: ' + error.message, 'error');
-    }
-  }
-  
-  // 初始化
-  async function init() {
-    // 检查是否在扩展环境中
-    if (typeof chrome === 'undefined' || !chrome.tabs) {
-      currentUrlSpan.textContent = '请在Chrome扩展环境中使用';
-      getSourceBtn.disabled = true;
-      return;
-    }
-    
-    try {
-      const tab = await getCurrentTab();
-      currentPageUrl = tab.url;
-      currentUrlSpan.textContent = currentPageUrl;
-      
-      // 获取扩展状态
-      await getExtensionStatus();
-    } catch (error) {
-      console.error('初始化失败:', error);
-      currentUrlSpan.textContent = '无法获取当前页面URL';
-    }
-  }
-  
-  // 获取扩展状态
-  async function getExtensionStatus() {
-    try {
-      const response = await chrome.runtime.sendMessage({ action: 'getExtensionStatus' });
-      if (response.success) {
-        extensionStatus = response.status;
-        extensionId = response.status.extensionId;
-        updateExtensionStatusDisplay();
+      if (response && response.success) {
+        this.showResult('页面分析', response.data)
       } else {
-        console.error('获取扩展状态失败:', response.error);
-        showStatus('无法获取扩展状态', 'error');
+        this.showError('分析失败，请重试')
       }
     } catch (error) {
-      console.error('获取扩展状态失败:', error);
-      showStatus('扩展通信失败', 'error');
+      console.error('分析页面失败:', error)
+      this.showError('分析失败，请检查页面是否支持')
     }
   }
-  
-  // 更新扩展状态显示
-  function updateExtensionStatusDisplay() {
-    if (!extensionStatus) return;
+
+  async comparePrice() {
+    this.showLoading('正在比较价格...')
     
-    // 创建状态显示元素（如果不存在）
-    let statusContainer = document.getElementById('extensionStatusContainer');
-    if (!statusContainer) {
-      statusContainer = document.createElement('div');
-      statusContainer.id = 'extensionStatusContainer';
-      statusContainer.className = 'extension-status';
-      
-      // 插入到页面顶部
-      const firstSection = document.querySelector('.section');
-      if (firstSection) {
-        firstSection.parentNode.insertBefore(statusContainer, firstSection);
-      }
-    }
-    
-    const isRegistered = extensionStatus.isRegistered;
-    const lastHeartbeat = extensionStatus.lastHeartbeat;
-    const timeSinceHeartbeat = lastHeartbeat ? Date.now() - lastHeartbeat : null;
-    
-    statusContainer.innerHTML = `
-      <h3>扩展状态</h3>
-      <div class="status-item">
-        <span class="status-label">扩展ID:</span>
-        <span class="status-value">${extensionStatus.extensionId}</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">注册状态:</span>
-        <span class="status-value ${isRegistered ? 'status-success' : 'status-error'}">
-          ${isRegistered ? '已注册' : '未注册'}
-        </span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">后端地址:</span>
-        <span class="status-value">${extensionStatus.backendUrl}</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">最后心跳:</span>
-        <span class="status-value">
-          ${lastHeartbeat ? 
-            `${Math.floor(timeSinceHeartbeat / 1000)}秒前` : 
-            '无记录'
-          }
-        </span>
-      </div>
-      <div class="status-actions">
-        <button id="forceRegisterBtn" class="btn btn-small">重新注册</button>
-        <button id="forceHeartbeatBtn" class="btn btn-small">发送心跳</button>
-        <button id="refreshStatusBtn" class="btn btn-small">刷新状态</button>
-      </div>
-    `;
-    
-    // 绑定按钮事件
-    const forceRegisterBtn = document.getElementById('forceRegisterBtn');
-    const forceHeartbeatBtn = document.getElementById('forceHeartbeatBtn');
-    const refreshStatusBtn = document.getElementById('refreshStatusBtn');
-    
-    if (forceRegisterBtn) {
-      forceRegisterBtn.addEventListener('click', forceRegister);
-    }
-    if (forceHeartbeatBtn) {
-      forceHeartbeatBtn.addEventListener('click', forceHeartbeat);
-    }
-    if (refreshStatusBtn) {
-      refreshStatusBtn.addEventListener('click', getExtensionStatus);
-    }
-  }
-  
-  // 强制重新注册
-  async function forceRegister() {
     try {
-      showStatus('正在重新注册...', 'info');
-      const response = await chrome.runtime.sendMessage({ action: 'forceRegister' });
-      if (response.success) {
-        showStatus('重新注册成功', 'success');
-        await getExtensionStatus(); // 刷新状态
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'comparePrice'
+      })
+      
+      if (response && response.success) {
+        this.showResult('价格比较', response.data)
       } else {
-        showStatus('重新注册失败: ' + response.error, 'error');
+        this.showError('价格比较失败')
       }
     } catch (error) {
-      console.error('重新注册失败:', error);
-      showStatus('重新注册失败', 'error');
+      console.error('价格比较失败:', error)
+      this.showError('价格比较失败，请重试')
     }
   }
-  
-  // 强制发送心跳
-  async function forceHeartbeat() {
+
+  async summarizeReviews() {
+    this.showLoading('正在分析评价...')
+    
     try {
-      showStatus('正在发送心跳...', 'info');
-      const response = await chrome.runtime.sendMessage({ action: 'forceHeartbeat' });
-      if (response.success) {
-        showStatus('心跳发送成功', 'success');
-        await getExtensionStatus(); // 刷新状态
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'summarizeReviews'
+      })
+      
+      if (response && response.success) {
+        this.showResult('评价摘要', response.data)
       } else {
-        showStatus('心跳发送失败: ' + response.error, 'error');
+        this.showError('评价分析失败')
       }
     } catch (error) {
-      console.error('心跳发送失败:', error);
-      showStatus('心跳发送失败', 'error');
+      console.error('评价分析失败:', error)
+      this.showError('评价分析失败，请重试')
     }
   }
-  
-  // 搜索商品
-  function searchProducts() {
-    if (!extractedProductsData || !extractedProductsData.products) return;
-    
-    const query = searchInput.value.toLowerCase().trim();
-    if (!query) {
-      filteredProducts = [...extractedProductsData.products];
-    } else {
-      filteredProducts = extractedProductsData.products.filter(product => {
-        return (product.title && product.title.toLowerCase().includes(query)) ||
-               (product.supplier && product.supplier.toLowerCase().includes(query)) ||
-               (product.specifications && product.specifications.toLowerCase().includes(query)) ||
-               (product.tags && product.tags.some(tag => tag.toLowerCase().includes(query)));
-      });
-    }
-    
-    sortAndRenderProducts();
-  }
-  
-  // 排序商品
-  function sortProducts(products) {
-    const sortType = sortSelect.value;
-    const sorted = [...products];
-    
-    switch (sortType) {
-      case 'price-asc':
-        sorted.sort((a, b) => {
-          const priceA = parseFloat(a.price?.replace(/[^\d.]/g, '') || '0');
-          const priceB = parseFloat(b.price?.replace(/[^\d.]/g, '') || '0');
-          return priceA - priceB;
-        });
-        break;
-      case 'price-desc':
-        sorted.sort((a, b) => {
-          const priceA = parseFloat(a.price?.replace(/[^\d.]/g, '') || '0');
-          const priceB = parseFloat(b.price?.replace(/[^\d.]/g, '') || '0');
-          return priceB - priceA;
-        });
-        break;
-      case 'sales-desc':
-        sorted.sort((a, b) => {
-          const salesA = parseInt(a.sales?.replace(/[^\d]/g, '') || '0');
-          const salesB = parseInt(b.sales?.replace(/[^\d]/g, '') || '0');
-          return salesB - salesA;
-        });
-        break;
-      case 'rating-desc':
-        sorted.sort((a, b) => {
-          const ratingA = parseFloat(a.rating?.replace(/[^\d.]/g, '') || '0');
-          const ratingB = parseFloat(b.rating?.replace(/[^\d.]/g, '') || '0');
-          return ratingB - ratingA;
-        });
-        break;
-      default:
-        // 保持原始顺序
-        break;
-    }
-    
-    return sorted;
-  }
-  
-  // 排序并渲染商品
-  function sortAndRenderProducts() {
-    const sorted = sortProducts(filteredProducts);
-    renderProductsList(sorted);
-    
-    // 更新摘要信息
-    const summaryDiv = document.getElementById('productsSummary');
-    const total = extractedProductsData ? extractedProductsData.total : 0;
-    const filtered = sorted.length;
-    summaryDiv.innerHTML = `共找到 ${total} 个商品${filtered !== total ? ` (筛选后: ${filtered} 个)` : ''}${extractedProductsData?.source_length ? ` (源码长度: ${extractedProductsData.source_length.toLocaleString()} 字符)` : ''}`;
-  }
-  
-  // 导出商品数据
-  function exportProducts() {
-    if (!extractedProductsData || !extractedProductsData.products || extractedProductsData.products.length === 0) {
-      showStatus('没有可导出的商品数据', 'error');
-      return;
-    }
-    
+
+  async uploadPageHTML() {
     try {
-      const exportData = {
-        url: currentPageUrl,
-        timestamp: new Date().toISOString(),
-        total: extractedProductsData.total,
-        products: extractedProductsData.products
-      };
+      this.showLoading('正在上传页面HTML...')
       
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      // 获取当前活动标签页
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       
-      // 生成文件名
-      const urlObj = new URL(currentPageUrl);
-      const hostname = urlObj.hostname.replace(/[^a-zA-Z0-9]/g, '_');
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
-      const filename = `products_${hostname}_${timestamp}.json`;
-      
-      // 创建下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      showStatus(`成功导出 ${extractedProductsData.total} 个商品数据！`, 'success');
-    } catch (error) {
-      console.error('导出失败:', error);
-      showStatus('导出失败: ' + error.message, 'error');
-    }
-  }
-  
-  // 切换视图模式
-  function toggleView() {
-    isCompactView = !isCompactView;
-    toggleViewBtn.textContent = isCompactView ? '详细视图' : '紧凑视图';
-    
-    if (isCompactView) {
-      productsResult.classList.add('compact-view');
-    } else {
-      productsResult.classList.remove('compact-view');
-    }
-    
-    // 重新渲染当前显示的商品
-    if (filteredProducts.length > 0) {
-      sortAndRenderProducts();
-    }
-  }
-  
-  // 绑定事件
-  getSourceBtn.addEventListener('click', getPageSource);
-  extractProductsBtn.addEventListener('click', extractProducts);
-  sendToBackendBtn.addEventListener('click', sendProductsToBackend);
-  copySourceBtn.addEventListener('click', copySourceToClipboard);
-  downloadSourceBtn.addEventListener('click', downloadSource);
-  
-  // 新功能事件绑定
-  if (searchInput) {
-    searchInput.addEventListener('input', searchProducts);
-  }
-  if (sortSelect) {
-    sortSelect.addEventListener('change', sortAndRenderProducts);
-  }
-  if (exportBtn) {
-    exportBtn.addEventListener('click', exportProducts);
-  }
-  if (toggleViewBtn) {
-    toggleViewBtn.addEventListener('click', toggleView);
-  }
-  
-  // 服务器数据相关事件绑定
-  if (getServerDataBtn) {
-    getServerDataBtn.addEventListener('click', getServerData);
-  }
-  if (dataTypeSelect) {
-    dataTypeSelect.addEventListener('change', onDataTypeChange);
-  }
-  if (refreshServerDataBtn) {
-    refreshServerDataBtn.addEventListener('click', refreshServerData);
-  }
-  if (exportServerDataBtn) {
-    exportServerDataBtn.addEventListener('click', exportServerData);
-  }
-  
-  // 初始化时禁用相关按钮
-  sendToBackendBtn.disabled = true;
-  if (exportBtn) exportBtn.disabled = true;
-  if (refreshServerDataBtn) refreshServerDataBtn.disabled = true;
-  if (exportServerDataBtn) exportServerDataBtn.disabled = true;
-  
-  // 上传HTML源码到后端
-  const uploadHtmlToBackend = async () => {
-    if (!currentPageSource) {
-      showStatus('请先获取页面源码', 'error');
-      return;
-    }
-
-    try {
-      showStatus('正在上传HTML源码到后端...', 'info');
-      uploadHtmlBtn.disabled = true;
-
-      // 检测页面平台类型
-      const detectPlatform = (url) => {
-        if (url.includes('1688.com') || url.includes('alibaba.com')) return 'alibaba';
-        if (url.includes('ozon.ru')) return 'ozon';
-        return 'other';
-      };
-
-      // 检测页面类型
-      const detectPageType = (html, url) => {
-        if (html.includes('product') || html.includes('商品') || html.includes('item') || url.includes('/offer/')) {
-          return 'product';
-        }
-        if (html.includes('search') || html.includes('搜索') || html.includes('list') || url.includes('search')) {
-          return 'search';
-        }
-        return 'unknown';
-      };
-
-      const platform = detectPlatform(currentPageUrl);
-      const pageType = detectPageType(currentPageSource, currentPageUrl);
-
-      const payload = {
-        url: currentPageUrl,
-        html_content: currentPageSource,
-        platform,
-        page_type: pageType,
-        metadata: {
-          collected_at: new Date(),
-          content_length: currentPageSource.length,
-          user_agent: navigator.userAgent,
-          source: 'extension'
-        }
-      };
-
-      console.log('提交HTML到后端:', {
-        url: currentPageUrl,
-        platform: platform,
-        page_type: pageType,
-        content_length: currentPageSource.length
-      });
-
-      const response = await fetch('http://localhost:3001/api/data-collection/submit-html', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      if (!tab) {
+        this.showError('无法获取当前标签页')
+        return
       }
 
-      const result = await response.json();
-      
-      // 处理解析结果
-      if (result.parse_result) {
-        if (result.parse_result.success) {
-          showStatus(`HTML源码上传并解析成功！数据ID: ${result.task_id}`, 'success');
-          if (result.parse_result.product_id) {
-            console.log('商品解析成功，产品ID:', result.parse_result.product_id);
-          }
-        } else {
-          showStatus(`HTML源码上传成功，但解析失败: ${result.warning || '未知错误'}`, 'warning');
-        }
-      } else {
-        showStatus(`HTML源码上传成功！数据ID: ${result.task_id}`, 'success');
-      }
-      
-      console.log('上传结果:', result);
-    } catch (error) {
-      console.error('上传HTML源码失败:', error);
-      showStatus('上传HTML源码失败: ' + error.message, 'error');
-    } finally {
-      uploadHtmlBtn.disabled = false;
-    }
-  };
+      // 向content script发送上传HTML的消息
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'uploadPageHTML'
+      })
 
-  // 下载源码文件
-  function downloadSource() {
-    if (!currentPageSource) {
-      showStatus('请先获取页面源码', 'error');
-      return;
-    }
-    
-    try {
-      const blob = new Blob([currentPageSource], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      
-      // 生成文件名
-      const urlObj = new URL(currentPageUrl);
-      const hostname = urlObj.hostname.replace(/[^a-zA-Z0-9]/g, '_');
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
-      const filename = `${hostname}_${timestamp}.html`;
-      
-      // 创建下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      showStatus('源码文件下载成功！', 'success');
-    } catch (error) {
-      console.error('下载失败:', error);
-      showStatus('下载失败: ' + error.message, 'error');
-    }
-  }
-
-  // 获取服务器数据
-  async function getServerData() {
-    try {
-      showStatus('正在连接服务器...', 'info');
-      getServerDataBtn.disabled = true;
-      
-      // 首先注册扩展
-      await registerExtension();
-      
-      // 获取默认数据
-      const dataType = dataTypeSelect.value || '';
-      const response = await fetch(`http://localhost:3001/api/extension/${extensionId}/data?type=${dataType}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      serverData = result;
-      
-      // 显示数据
-      displayServerData(result);
-      
-      // 显示服务器数据容器
-      serverDataContainer.style.display = 'block';
-      
-      // 启用相关按钮
-      refreshServerDataBtn.disabled = false;
-      exportServerDataBtn.disabled = false;
-      
-      showStatus('服务器数据获取成功！', 'success');
-    } catch (error) {
-      console.error('获取服务器数据失败:', error);
-      showStatus('获取服务器数据失败: ' + error.message, 'error');
-    } finally {
-      getServerDataBtn.disabled = false;
-    }
-  }
-
-  // 注册扩展
-  async function registerExtension() {
-    try {
-      const response = await fetch('http://localhost:3001/api/extension/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          extensionId: extensionId
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`注册失败: ${response.status}`);
-      }
-
-      console.log('扩展注册成功');
-    } catch (error) {
-      console.error('扩展注册失败:', error);
-      throw error;
-    }
-  }
-
-  // 显示服务器数据
-  function displayServerData(data) {
-    if (!data) {
-      serverDataDisplay.value = '暂无数据';
-      serverDataInfo.textContent = '';
-      return;
-    }
-
-    // 格式化JSON数据
-    const formattedData = JSON.stringify(data, null, 2);
-    serverDataDisplay.value = formattedData;
-    
-    // 显示数据信息
-    const dataSize = new Blob([formattedData]).size;
-    const timestamp = data.timestamp || new Date().toISOString();
-    serverDataInfo.innerHTML = `
-      <div class="data-info">
-        <span>数据大小: ${dataSize} 字节</span>
-        <span>更新时间: ${new Date(timestamp).toLocaleString()}</span>
-        <span>扩展ID: ${extensionId}</span>
-      </div>
-    `;
-  }
-
-  // 数据类型选择变化
-  async function onDataTypeChange() {
-    if (!serverData) {
-      return;
-    }
-    
-    const selectedType = dataTypeSelect.value;
-    if (!selectedType) {
-      displayServerData(serverData);
-      return;
-    }
-    
-    try {
-      showStatus('正在获取指定类型数据...', 'info');
-      
-      const response = await fetch(`http://localhost:3001/api/extension/${extensionId}/data?type=${selectedType}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      displayServerData(result);
-      showStatus('数据获取成功！', 'success');
-    } catch (error) {
-      console.error('获取指定类型数据失败:', error);
-      showStatus('获取数据失败: ' + error.message, 'error');
-    }
-  }
-
-  // 刷新服务器数据
-  async function refreshServerData() {
-    await getServerData();
-  }
-
-  // 导出服务器数据
-  function exportServerData() {
-    if (!serverData) {
-      showStatus('暂无服务器数据可导出', 'error');
-      return;
-    }
-    
-    try {
-      const dataToExport = serverDataDisplay.value;
-      const blob = new Blob([dataToExport], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      // 生成文件名
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
-      const dataType = dataTypeSelect.value || 'default';
-      const filename = `server_data_${dataType}_${timestamp}.json`;
-      
-      // 创建下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      showStatus('服务器数据导出成功！', 'success');
-    } catch (error) {
-      console.error('导出失败:', error);
-      showStatus('导出失败: ' + error.message, 'error');
-    }
-  }
-  
-  // 初始化
-  async function init() {
-    // 检查是否在扩展环境中
-    if (typeof chrome === 'undefined' || !chrome.tabs) {
-      currentUrlSpan.textContent = '请在Chrome扩展环境中使用';
-      getSourceBtn.disabled = true;
-      return;
-    }
-    
-    try {
-      const tab = await getCurrentTab();
-      currentPageUrl = tab.url;
-      currentUrlSpan.textContent = currentPageUrl;
-      
-      // 获取扩展状态
-      await getExtensionStatus();
-    } catch (error) {
-      console.error('初始化失败:', error);
-      currentUrlSpan.textContent = '无法获取当前页面URL';
-    }
-  }
-  
-  // 获取扩展状态
-  async function getExtensionStatus() {
-    try {
-      const response = await chrome.runtime.sendMessage({ action: 'getExtensionStatus' });
-      if (response.success) {
-        extensionStatus = response.status;
-        extensionId = response.status.extensionId;
-        updateExtensionStatusDisplay();
-      } else {
-        console.error('获取扩展状态失败:', response.error);
-        showStatus('无法获取扩展状态', 'error');
-      }
-    } catch (error) {
-      console.error('获取扩展状态失败:', error);
-      showStatus('扩展通信失败', 'error');
-    }
-  }
-  
-  // 更新扩展状态显示
-  function updateExtensionStatusDisplay() {
-    if (!extensionStatus) return;
-    
-    // 创建状态显示元素（如果不存在）
-    let statusContainer = document.getElementById('extensionStatusContainer');
-    if (!statusContainer) {
-      statusContainer = document.createElement('div');
-      statusContainer.id = 'extensionStatusContainer';
-      statusContainer.className = 'extension-status';
-      
-      // 插入到页面顶部
-      const firstSection = document.querySelector('.section');
-      if (firstSection) {
-        firstSection.parentNode.insertBefore(statusContainer, firstSection);
-      }
-    }
-    
-    const isRegistered = extensionStatus.isRegistered;
-    const lastHeartbeat = extensionStatus.lastHeartbeat;
-    const timeSinceHeartbeat = lastHeartbeat ? Date.now() - lastHeartbeat : null;
-    
-    statusContainer.innerHTML = `
-      <h3>扩展状态</h3>
-      <div class="status-item">
-        <span class="status-label">扩展ID:</span>
-        <span class="status-value">${extensionStatus.extensionId}</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">注册状态:</span>
-        <span class="status-value ${isRegistered ? 'status-success' : 'status-error'}">
-          ${isRegistered ? '已注册' : '未注册'}
-        </span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">后端地址:</span>
-        <span class="status-value">${extensionStatus.backendUrl}</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">最后心跳:</span>
-        <span class="status-value">
-          ${lastHeartbeat ? 
-            `${Math.floor(timeSinceHeartbeat / 1000)}秒前` : 
-            '无记录'
-          }
-        </span>
-      </div>
-      <div class="status-actions">
-        <button id="forceRegisterBtn" class="btn btn-small">重新注册</button>
-        <button id="forceHeartbeatBtn" class="btn btn-small">发送心跳</button>
-        <button id="refreshStatusBtn" class="btn btn-small">刷新状态</button>
-      </div>
-    `;
-    
-    // 绑定按钮事件
-    const forceRegisterBtn = document.getElementById('forceRegisterBtn');
-    const forceHeartbeatBtn = document.getElementById('forceHeartbeatBtn');
-    const refreshStatusBtn = document.getElementById('refreshStatusBtn');
-    
-    if (forceRegisterBtn) {
-      forceRegisterBtn.addEventListener('click', forceRegister);
-    }
-    if (forceHeartbeatBtn) {
-      forceHeartbeatBtn.addEventListener('click', forceHeartbeat);
-    }
-    if (refreshStatusBtn) {
-      refreshStatusBtn.addEventListener('click', getExtensionStatus);
-    }
-  }
-  
-  // 强制重新注册
-  async function forceRegister() {
-    try {
-      showStatus('正在重新注册...', 'info');
-      const response = await chrome.runtime.sendMessage({ action: 'forceRegister' });
-      if (response.success) {
-        showStatus('重新注册成功', 'success');
-        await getExtensionStatus(); // 刷新状态
-      } else {
-        showStatus('重新注册失败: ' + response.error, 'error');
-      }
-    } catch (error) {
-      console.error('重新注册失败:', error);
-      showStatus('重新注册失败', 'error');
-    }
-  }
-  
-  // 强制发送心跳
-  async function forceHeartbeat() {
-    try {
-      showStatus('正在发送心跳...', 'info');
-      const response = await chrome.runtime.sendMessage({ action: 'forceHeartbeat' });
-      if (response.success) {
-        showStatus('心跳发送成功', 'success');
-        await getExtensionStatus(); // 刷新状态
-      } else {
-        showStatus('心跳发送失败: ' + response.error, 'error');
-      }
-    } catch (error) {
-      console.error('心跳发送失败:', error);
-      showStatus('心跳发送失败', 'error');
-    }
-  }
-  
-  // 搜索商品
-  function searchProducts() {
-    if (!extractedProductsData || !extractedProductsData.products) return;
-    
-    const query = searchInput.value.toLowerCase().trim();
-    if (!query) {
-      filteredProducts = [...extractedProductsData.products];
-    } else {
-      filteredProducts = extractedProductsData.products.filter(product => {
-        return (product.title && product.title.toLowerCase().includes(query)) ||
-               (product.supplier && product.supplier.toLowerCase().includes(query)) ||
-               (product.specifications && product.specifications.toLowerCase().includes(query)) ||
-               (product.tags && product.tags.some(tag => tag.toLowerCase().includes(query)));
-      });
-    }
-    
-    sortAndRenderProducts();
-  }
-  
-  // 排序商品
-  function sortProducts(products) {
-    const sortType = sortSelect.value;
-    const sorted = [...products];
-    
-    switch (sortType) {
-      case 'price-asc':
-        sorted.sort((a, b) => {
-          const priceA = parseFloat(a.price?.replace(/[^\d.]/g, '') || '0');
-          const priceB = parseFloat(b.price?.replace(/[^\d.]/g, '') || '0');
-          return priceA - priceB;
-        });
-        break;
-      case 'price-desc':
-        sorted.sort((a, b) => {
-          const priceA = parseFloat(a.price?.replace(/[^\d.]/g, '') || '0');
-          const priceB = parseFloat(b.price?.replace(/[^\d.]/g, '') || '0');
-          return priceB - priceA;
-        });
-        break;
-      case 'sales-desc':
-        sorted.sort((a, b) => {
-          const salesA = parseInt(a.sales?.replace(/[^\d]/g, '') || '0');
-          const salesB = parseInt(b.sales?.replace(/[^\d]/g, '') || '0');
-          return salesB - salesA;
-        });
-        break;
-      case 'rating-desc':
-        sorted.sort((a, b) => {
-          const ratingA = parseFloat(a.rating?.replace(/[^\d.]/g, '') || '0');
-          const ratingB = parseFloat(b.rating?.replace(/[^\d.]/g, '') || '0');
-          return ratingB - ratingA;
-        });
-        break;
-      default:
-        // 保持原始顺序
-        break;
-    }
-    
-    return sorted;
-  }
-  
-  // 排序并渲染商品
-  function sortAndRenderProducts() {
-    const sorted = sortProducts(filteredProducts);
-    renderProductsList(sorted);
-    
-    // 更新摘要信息
-    const summaryDiv = document.getElementById('productsSummary');
-    const total = extractedProductsData ? extractedProductsData.total : 0;
-    const filtered = sorted.length;
-    summaryDiv.innerHTML = `共找到 ${total} 个商品${filtered !== total ? ` (筛选后: ${filtered} 个)` : ''}${extractedProductsData?.source_length ? ` (源码长度: ${extractedProductsData.source_length.toLocaleString()} 字符)` : ''}`;
-  }
-  
-  // 导出商品数据
-  function exportProducts() {
-    if (!extractedProductsData || !extractedProductsData.products || extractedProductsData.products.length === 0) {
-      showStatus('没有可导出的商品数据', 'error');
-      return;
-    }
-    
-    try {
-      const exportData = {
-        url: currentPageUrl,
-        timestamp: new Date().toISOString(),
-        total: extractedProductsData.total,
-        products: extractedProductsData.products
-      };
-      
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      // 生成文件名
-      const urlObj = new URL(currentPageUrl);
-      const hostname = urlObj.hostname.replace(/[^a-zA-Z0-9]/g, '_');
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[^0-9]/g, '');
-      const filename = `products_${hostname}_${timestamp}.json`;
-      
-      // 创建下载链接
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      showStatus(`成功导出 ${extractedProductsData.total} 个商品数据！`, 'success');
-    } catch (error) {
-      console.error('导出失败:', error);
-      showStatus('导出失败: ' + error.message, 'error');
-    }
-  }
-  
-  // 切换视图模式
-  function toggleView() {
-    isCompactView = !isCompactView;
-    toggleViewBtn.textContent = isCompactView ? '详细视图' : '紧凑视图';
-    
-    if (isCompactView) {
-      productsResult.classList.add('compact-view');
-    } else {
-      productsResult.classList.remove('compact-view');
-    }
-    
-    // 重新渲染当前显示的商品
-    if (filteredProducts.length > 0) {
-      sortAndRenderProducts();
-    }
-  }
-  
-  // 绑定事件
-  getSourceBtn.addEventListener('click', getPageSource);
-  extractProductsBtn.addEventListener('click', extractProducts);
-  sendToBackendBtn.addEventListener('click', sendProductsToBackend);
-  uploadHtmlBtn.addEventListener('click', uploadHtmlToBackend);
-  processUrlBtn.addEventListener('click', processUrlAutomatically);
-  copySourceBtn.addEventListener('click', copySourceToClipboard);
-  downloadSourceBtn.addEventListener('click', downloadSource);
-  
-  // 新功能事件绑定
-  if (searchInput) {
-    searchInput.addEventListener('input', searchProducts);
-  }
-  if (sortSelect) {
-    sortSelect.addEventListener('change', sortAndRenderProducts);
-  }
-  if (exportBtn) {
-    exportBtn.addEventListener('click', exportProducts);
-  }
-  if (toggleViewBtn) {
-    toggleViewBtn.addEventListener('click', toggleView);
-  }
-  
-  // 服务器数据相关事件绑定
-  if (getServerDataBtn) {
-    getServerDataBtn.addEventListener('click', getServerData);
-  }
-  if (dataTypeSelect) {
-    dataTypeSelect.addEventListener('change', onDataTypeChange);
-  }
-  if (refreshServerDataBtn) {
-    refreshServerDataBtn.addEventListener('click', refreshServerData);
-  }
-  if (exportServerDataBtn) {
-    exportServerDataBtn.addEventListener('click', exportServerData);
-  }
-  
-  // 初始化时禁用相关按钮
-  sendToBackendBtn.disabled = true;
-  uploadHtmlBtn.disabled = true;
-  processUrlBtn.disabled = false; // 自动处理按钮始终可用
-  if (exportBtn) exportBtn.disabled = true;
-  if (refreshServerDataBtn) refreshServerDataBtn.disabled = true;
-  if (exportServerDataBtn) exportServerDataBtn.disabled = true;
-  
-  // 初始化插件
-  init();
-  
-  // 自动处理网址功能
-  async function processUrlAutomatically() {
-    const url = urlInput.value.trim();
-    
-    if (!url) {
-      showProcessStatus('请输入要处理的网址', 'error');
-      return;
-    }
-    
-    // 验证URL格式
-    try {
-      new URL(url);
-    } catch (error) {
-      showProcessStatus('请输入有效的网址格式', 'error');
-      return;
-    }
-    
-    try {
-      processUrlBtn.disabled = true;
-      processUrlBtn.textContent = '处理中...';
-      showProcessStatus('正在自动处理网址，请稍候...', 'info');
-      
-      // 发送消息到后台脚本进行自动处理
-      const response = await chrome.runtime.sendMessage({
-        action: 'processUrl',
-        url: url
-      });
-      
-      if (response.success) {
-        const result = response.result;
-        showProcessStatus(
-          `处理成功！网址: ${result.url}, HTML长度: ${result.htmlLength} 字符, 上传时间: ${new Date(result.timestamp).toLocaleString()}`,
-          'success'
-        );
+      if (response && response.success) {
+        this.showResult('HTML上传成功', `✅ ${response.message}
         
-        // 清空输入框
-        urlInput.value = '';
+页面URL: ${response.data.url}
+文件大小: ${Math.round(response.data.size / 1024)} KB
+上传时间: ${new Date(response.data.uploadedAt).toLocaleString()}`)
       } else {
-        showProcessStatus(`处理失败: ${response.error}`, 'error');
+        this.showError(response?.message || 'HTML上传失败')
       }
-      
     } catch (error) {
-      console.error('自动处理网址失败:', error);
-      showProcessStatus(`处理失败: ${error.message}`, 'error');
-    } finally {
-      processUrlBtn.disabled = false;
-      processUrlBtn.textContent = '自动处理';
+      console.error('HTML上传失败:', error)
+      this.showError('HTML上传失败，请重试')
     }
   }
-  
-  // 显示处理状态
-  function showProcessStatus(message, type) {
-    processStatus.textContent = message;
-    processStatus.className = `status-message ${type}`;
-    
-    // 成功或错误消息5秒后自动隐藏
-    if (type === 'success' || type === 'error') {
-      setTimeout(() => {
-        processStatus.className = 'status-message';
-        processStatus.textContent = '';
-      }, 5000);
+
+  async upload1688SearchData() {
+    try {
+      this.showLoading('正在上传1688搜索数据...')
+      
+      // 获取当前活动标签页
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      
+      if (!tab) {
+        this.showError('无法获取当前标签页')
+        return
+      }
+
+      // 向content script发送上传1688搜索数据的消息
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'upload1688SearchData'
+      })
+
+      if (response && response.success) {
+        const extractedData = response.data.extractedData
+        const backendResult = response.data.backendResult
+        
+        this.showResult('1688搜索数据上传成功', `✅ ${response.message}
+        
+页面URL: ${backendResult.data.url}
+搜索关键词: ${extractedData.keyword || '未检测到'}
+产品数量: ${extractedData.products?.length || 0}
+总结果数: ${extractedData.totalCount || '未知'}
+当前页码: ${extractedData.pagination?.currentPage || '未知'}
+上传时间: ${new Date(backendResult.data.timestamp).toLocaleString()}`)
+      } else {
+        this.showError(response?.message || '1688搜索数据上传失败')
+      }
+    } catch (error) {
+      console.error('1688搜索数据上传失败:', error)
+      this.showError('1688搜索数据上传失败，请重试')
     }
   }
-});
+
+  openSettings() {
+    // 打开设置页面
+    chrome.tabs.create({
+      url: chrome.runtime.getURL('src/popup/settings.html')
+    })
+  }
+
+  showLoading(message) {
+    this.elements.infoSection.style.display = 'block'
+    this.elements.analysisResult.innerHTML = `
+      <div class="loading"></div>
+      <span style="margin-left: 8px;">${message}</span>
+    `
+  }
+
+  showResult(title, data) {
+    this.elements.infoSection.style.display = 'block'
+    this.elements.analysisResult.innerHTML = `
+      <div>
+        <strong>${title}</strong>
+        <div style="margin-top: 8px; white-space: pre-wrap;">${data}</div>
+      </div>
+    `
+  }
+
+  showError(message) {
+    this.elements.infoSection.style.display = 'block'
+    this.elements.analysisResult.innerHTML = `
+      <div style="color: #ef4444;">
+        ❌ ${message}
+      </div>
+    `
+  }
+}
+
+// 初始化弹窗管理器
+document.addEventListener('DOMContentLoaded', () => {
+  new PopupManager()
+})

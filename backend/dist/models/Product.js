@@ -1,171 +1,109 @@
-import mongoose, { Document, Schema } from 'mongoose';
-// 商品Schema定义
-const ProductSchema = new Schema({
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Product = exports.UpdateProductSchema = exports.CreateProductSchema = exports.ProductSchema = void 0;
+const mongoose_1 = __importStar(require("mongoose"));
+const zod_1 = require("zod");
+exports.ProductSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1, 'Product name is required'),
+    description: zod_1.z.string().min(10, 'Description must be at least 10 characters'),
+    price: zod_1.z.number().positive('Price must be positive'),
+    category: zod_1.z.string().min(1, 'Category is required'),
+    brand: zod_1.z.string().optional(),
+    images: zod_1.z.array(zod_1.z.string().url()).default([]),
+    stock: zod_1.z.number().int().min(0, 'Stock cannot be negative').default(0),
+    isActive: zod_1.z.boolean().default(true),
+    tags: zod_1.z.array(zod_1.z.string()).default([]),
+    specifications: zod_1.z.record(zod_1.z.string(), zod_1.z.string()).optional(),
+    createdAt: zod_1.z.date().optional(),
+    updatedAt: zod_1.z.date().optional(),
+});
+exports.CreateProductSchema = exports.ProductSchema.omit({ createdAt: true, updatedAt: true });
+exports.UpdateProductSchema = exports.ProductSchema.partial().omit({ createdAt: true, updatedAt: true });
+const mongooseProductSchema = new mongoose_1.Schema({
     name: {
         type: String,
-        required: [true, '商品名称是必需的'],
+        required: true,
         trim: true,
-        maxlength: [200, '商品名称不能超过200个字符']
     },
     description: {
         type: String,
-        maxlength: [2000, '商品描述不能超过2000个字符']
+        required: true,
+        minlength: 10,
     },
     price: {
         type: Number,
-        required: [true, '商品价格是必需的'],
-        min: [0, '价格不能为负数']
-    },
-    originalPrice: {
-        type: Number,
-        min: [0, '原价不能为负数']
+        required: true,
+        min: 0,
     },
     category: {
         type: String,
-        trim: true
+        required: true,
+        trim: true,
     },
     brand: {
         type: String,
-        trim: true
+        trim: true,
     },
-    images: {
-        type: [String],
-        default: [],
-        validate: {
-            validator: function (v) {
-                return v.length <= 10;
-            },
-            message: '图片数量不能超过10张'
-        }
+    images: [{
+            type: String,
+        }],
+    stock: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0,
     },
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
+    tags: [{
+            type: String,
+            trim: true,
+        }],
     specifications: {
         type: Map,
         of: String,
-        default: new Map()
     },
-    stock: {
-        type: Number,
-        required: [true, '库存数量是必需的'],
-        min: [0, '库存不能为负数'],
-        default: 0
-    },
-    sku: {
-        type: String,
-        required: [true, 'SKU是必需的'],
-        unique: true,
-        trim: true
-    },
-    status: {
-        type: String,
-        enum: ['active', 'inactive', 'out_of_stock'],
-        default: 'active'
-    },
-    tags: {
-        type: [String],
-        default: []
-    },
-    rating: {
-        average: {
-            type: Number,
-            min: 0,
-            max: 5,
-            default: 0
-        },
-        count: {
-            type: Number,
-            min: 0,
-            default: 0
-        }
-    },
-    source: {
-        platform: {
-            type: String,
-            required: [true, '来源平台是必需的']
-        },
-        url: {
-            type: String,
-            required: [true, '来源URL是必需的']
-        },
-        extractedAt: {
-            type: Date,
-            default: Date.now
-        },
-        originalIndex: {
-            type: Number
-        }
-    },
-    supplier: {
-        type: String,
-        trim: true
-    },
-    sales: {
-        type: String,
-        trim: true
-    }
 }, {
-    timestamps: true, // 自动添加createdAt和updatedAt字段
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+    timestamps: true,
 });
-// 索引设置
-ProductSchema.index({ name: 'text', description: 'text' }); // 全文搜索索引
-ProductSchema.index({ category: 1 }); // 分类索引
-ProductSchema.index({ brand: 1 }); // 品牌索引
-ProductSchema.index({ price: 1 }); // 价格索引
-ProductSchema.index({ status: 1 }); // 状态索引
-ProductSchema.index({ 'source.platform': 1 }); // 来源平台索引
-ProductSchema.index({ createdAt: -1 }); // 创建时间索引
-// 虚拟字段：折扣百分比
-ProductSchema.virtual('discountPercentage').get(function () {
-    if (this.originalPrice && this.originalPrice > this.price) {
-        return Math.round(((this.originalPrice - this.price) / this.originalPrice) * 100);
-    }
-    return 0;
-});
-// 虚拟字段：是否有库存
-ProductSchema.virtual('inStock').get(function () {
-    return this.stock > 0 && this.status === 'active';
-});
-// 中间件：保存前自动更新状态
-ProductSchema.pre('save', function (next) {
-    if (this.stock === 0 && this.status === 'active') {
-        this.status = 'out_of_stock';
-    }
-    next();
-});
-// 静态方法：根据分类查找商品
-ProductSchema.statics.findByCategory = function (category) {
-    return this.find({ category, status: 'active' });
-};
-// 静态方法：根据品牌查找商品
-ProductSchema.statics.findByBrand = function (brand) {
-    return this.find({ brand, status: 'active' });
-};
-// 静态方法：价格范围查询
-ProductSchema.statics.findByPriceRange = function (minPrice, maxPrice) {
-    return this.find({
-        price: { $gte: minPrice, $lte: maxPrice },
-        status: 'active'
-    });
-};
-// 实例方法：更新库存
-ProductSchema.methods.updateStock = function (quantity) {
-    this.stock = Math.max(0, this.stock + quantity);
-    if (this.stock === 0) {
-        this.status = 'out_of_stock';
-    }
-    else if (this.status === 'out_of_stock') {
-        this.status = 'active';
-    }
-    return this.save();
-};
-// 实例方法：添加评分
-ProductSchema.methods.addRating = function (rating) {
-    const totalRating = this.rating.average * this.rating.count + rating;
-    this.rating.count += 1;
-    this.rating.average = totalRating / this.rating.count;
-    return this.save();
-};
-export const Product = mongoose.model('Product', ProductSchema);
-export default Product;
+mongooseProductSchema.index({ name: 'text', description: 'text' });
+mongooseProductSchema.index({ category: 1 });
+mongooseProductSchema.index({ price: 1 });
+mongooseProductSchema.index({ isActive: 1 });
+exports.Product = mongoose_1.default.model('Product', mongooseProductSchema);
 //# sourceMappingURL=Product.js.map

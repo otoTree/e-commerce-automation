@@ -16,4 +16,6 @@ export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_pr
 这是国内网络需要使用代理
 
 
-
+前端 nextjs + shadcn-ui + zustand
+后端 express + zod + mongoose
+浏览器插件

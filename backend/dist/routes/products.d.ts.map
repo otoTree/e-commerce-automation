@@ -1,1 +1,1 @@
-{"version":3,"file":"products.d.ts","sourceRoot":"","sources":["../../src/routes/products.ts"],"names":[],"mappings":"AAMA,QAAA,MAAM,MAAM,4CAAW,CAAC;AA+SxB,eAAe,MAAM,CAAC"}
+{"version":3,"file":"products.d.ts","sourceRoot":"","sources":["../../src/routes/products.ts"],"names":[],"mappings":"AAIA,QAAA,MAAM,MAAM,4CAAmB,CAAA;AAgP/B,eAAe,MAAM,CAAA"}
